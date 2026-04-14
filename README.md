@@ -1,4 +1,4 @@
-# HackSlashMovement
+# HackAndSlash Combat System
 
 > An Unreal Engine 5.7 third-person action combat prototype inspired by the fluid, cancelable combo flow of **Devil May Cry** and **Final Fantasy XVI**
 
