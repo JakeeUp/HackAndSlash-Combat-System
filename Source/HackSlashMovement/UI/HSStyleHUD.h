@@ -8,6 +8,9 @@
 #include "HSStyleHUD.generated.h"
 
 
+class AHSPlayerCharacter;
+
+
 UCLASS()
 class HACKSLASHMOVEMENT_API UHSStyleHUD : public UUserWidget
 {
@@ -50,12 +53,54 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Style HUD")
 	float ComboFadeDelay = 2.f;
 
+	/*****************************************************/
+	/*              FF16 Movement Sway                   */
+	/*****************************************************/
+
+	/** Max pixel offset the HUD sways opposite to player movement. */
+	UPROPERTY(EditDefaultsOnly, Category = "Style HUD|Sway")
+	float SwayMaxOffset = 15.f;
+
+	/** How fast the sway interpolates toward the target offset. */
+	UPROPERTY(EditDefaultsOnly, Category = "Style HUD|Sway")
+	float SwayInterpSpeed = 6.f;
+
+	/*****************************************************/
+	/*              DMC Rank Slam + Hit Pulse            */
+	/*****************************************************/
+
+	/** Scale the HUD slams to on rank change. */
+	UPROPERTY(EditDefaultsOnly, Category = "Style HUD|Slam")
+	float RankSlamScale = 1.4f;
+
+	/** Scale the HUD pulses to on each hit. */
+	UPROPERTY(EditDefaultsOnly, Category = "Style HUD|Slam")
+	float HitPulseScale = 1.1f;
+
+	/** Scale for the 10-hit milestone slam. */
+	UPROPERTY(EditDefaultsOnly, Category = "Style HUD|Slam")
+	float MilestoneSlamScale = 1.25f;
+
+	/** How fast the scale snaps back to 1.0 after a slam/pulse. */
+	UPROPERTY(EditDefaultsOnly, Category = "Style HUD|Slam")
+	float ScaleRecoverSpeed = 8.f;
+
 private:
 	UPROPERTY()
 	UHSStyleComponent* CachedStyle;
 
+	UPROPERTY()
+	AHSPlayerCharacter* CachedPlayer;
+
 	float ComboVisibleTimer = 0.f;
 	int32 LastComboCount = 0;
+
+	// Sway state
+	FVector2D CurrentSwayOffset = FVector2D::ZeroVector;
+
+	// Scale state (slam/pulse)
+	float CurrentScale = 1.f;
+	EStyleRank LastRank = EStyleRank::D;
 
 	UFUNCTION()
 	void OnRankChanged(EStyleRank NewRank);

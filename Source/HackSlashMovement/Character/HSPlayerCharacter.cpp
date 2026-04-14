@@ -60,6 +60,8 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	CameraBoom->TargetArmLength = 400.f;
 	CameraBoom->SocketOffset = FVector(0.f, 40.f, 60.f);
 	CameraBoom->bUsePawnControlRotation = true;
+	CameraBoom->bDoCollisionTest = true;
+	CameraBoom->ProbeSize = 20.f;
 
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
@@ -138,21 +140,38 @@ void AHSPlayerCharacter::Tick(float DeltaTime)
 			const FVector MyLoc = GetActorLocation();
 			const FVector EnemyLoc = LockedTarget->GetActorLocation();
 
-			// DMC3 pattern: camera focus point uses horizontal position of both characters
-			// but keeps a FIXED HEIGHT relative to the player -- never chases the enemy's Z.
-			// This prevents the camera from tilting under during air combos.
+			// DMC3 pattern: focus point between both characters horizontally,
+			// but at a FIXED HEIGHT above the HIGHER of the two characters.
+			// This prevents the camera from going under terrain on slopes.
+			const float HigherZ = FMath::Max(MyLoc.Z, EnemyLoc.Z);
+
 			FVector FocusPoint;
 			FocusPoint.X = FMath::Lerp(MyLoc.X, EnemyLoc.X, LockOnFocusBias);
 			FocusPoint.Y = FMath::Lerp(MyLoc.Y, EnemyLoc.Y, LockOnFocusBias);
-			FocusPoint.Z = MyLoc.Z + LockOnFocusHeight;  // Fixed height above player, not enemy
+			FocusPoint.Z = HigherZ + LockOnFocusHeight;
 
 			if (APlayerController* PC = Cast<APlayerController>(Controller))
 			{
+				// Calculate look direction from the camera's approximate world position
+				// (behind and above the player) toward the focus point
 				FRotator LookAt = (FocusPoint - MyLoc).Rotation();
 				LookAt.Pitch += LockOnPitchOffset;
 
-				// Clamp pitch so camera never goes under the action or looks straight up
+				// Clamp pitch so camera never goes under the action
 				LookAt.Pitch = FMath::Clamp(LookAt.Pitch, LockOnPitchMin, LockOnPitchMax);
+
+				// DMC3 safety: if the resulting camera position would be below the player,
+				// push the pitch back up. Calculate where the camera would end up.
+				const float ArmLen = CameraBoom ? CameraBoom->TargetArmLength : 500.f;
+				const FVector CamOffset = CameraBoom ? CameraBoom->SocketOffset : FVector::ZeroVector;
+				const float CamZ = MyLoc.Z + CamOffset.Z - ArmLen * FMath::Sin(FMath::DegreesToRadians(LookAt.Pitch));
+
+				if (CamZ < MyLoc.Z + LockOnMinCameraHeight)
+				{
+					// Solve for the pitch that keeps the camera at minimum height
+					const float NeededSin = (MyLoc.Z + CamOffset.Z - (MyLoc.Z + LockOnMinCameraHeight)) / ArmLen;
+					LookAt.Pitch = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(NeededSin, -1.f, 1.f)));
+				}
 
 				const FRotator Current = PC->GetControlRotation();
 				const FRotator Interped = FMath::RInterpTo(Current, LookAt, DeltaTime, LockOnInterpSpeed);
@@ -300,6 +319,11 @@ void AHSPlayerCharacter::LightAttack()
 	if (GetCharacterMovement()->IsFalling())
 	{
 		Combat->TryAirAttack();
+	}
+	else if (LockedTarget && IsBackTiltInput())
+	{
+		// DMC3 High Time: locked on + back tilt + light attack = rising attack
+		Combat->TryRisingAttack();
 	}
 	else
 	{
@@ -456,7 +480,7 @@ void AHSPlayerCharacter::FireProjectile()
 	}
 
 	// Cancel active attacks first so the cast montage doesn't orphan AN_AttackFinished
-	if (Combat->IsAttacking())
+	if (Combat && Combat->IsAttacking())
 	{
 		Combat->CancelAttack();
 	}
@@ -579,8 +603,11 @@ void AHSPlayerCharacter::Dodge()
 	UAnimMontage* Montage = GetDodgeMontage(bHasInput ? 0 : 1);
 	if (!Montage) return;
 
+	// Dodging only rewards style points if used mid-combat (cancel dodge)
+	const bool bWasAttacking = Combat && Combat->IsAttacking();
+
 	// Dodge cancels active attack montages
-	if (Combat && Combat->IsAttacking())
+	if (bWasAttacking)
 	{
 		Combat->CancelAttack();
 	}
@@ -588,8 +615,7 @@ void AHSPlayerCharacter::Dodge()
 	bIsDodging = true;
 	bDodgeRecoveryActive = false;
 
-	// Dodging rewards style points
-	if (Style)
+	if (bWasAttacking && Style)
 	{
 		Style->RegisterDodge();
 	}
@@ -627,6 +653,27 @@ void AHSPlayerCharacter::Dodge()
 	FOnMontageEnded EndDelegate;
 	EndDelegate.BindUObject(this, &AHSPlayerCharacter::OnDodgeMontageEnded);
 	AnimInst->Montage_SetEndDelegate(EndDelegate, Montage);
+}
+
+bool AHSPlayerCharacter::IsBackTiltInput() const
+{
+	if (!LockedTarget || !Controller) return false;
+	if (moveInputCached.IsNearlyZero(0.1f)) return false;
+
+	// Resolve the stick input into a world direction relative to the camera
+	const FRotator CamYaw(0.f, Controller->GetControlRotation().Yaw, 0.f);
+	const FVector Forward = FRotationMatrix(CamYaw).GetUnitAxis(EAxis::X);
+	const FVector Right = FRotationMatrix(CamYaw).GetUnitAxis(EAxis::Y);
+	const FVector InputWorldDir = (Forward * moveInputCached.Y + Right * moveInputCached.X).GetSafeNormal();
+
+	// Direction from player toward the locked target
+	FVector ToTarget = LockedTarget->GetActorLocation() - GetActorLocation();
+	ToTarget.Z = 0.f;
+	ToTarget.Normalize();
+
+	// If the input direction is roughly opposite the target direction, it's a back-tilt
+	const float Dot = FVector::DotProduct(InputWorldDir, ToTarget);
+	return Dot < -0.5f;
 }
 
 FVector AHSPlayerCharacter::ResolveCameraRelativeInputDirection() const

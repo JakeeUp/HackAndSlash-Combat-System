@@ -226,6 +226,13 @@ void AHSDummyEnemy::ApplyKnockback(const FVector& HitDirection, EHitWeight HitWe
 		}
 	}
 
+	// DMC-style juggle: if already airborne, apply a small upward push to
+	// keep the enemy suspended regardless of attack type.
+	if (EnemyState == EEnemyState::EES_Airborne && Lift <= 0.f)
+	{
+		Lift = AirJuggleLift;
+	}
+
 	FVector KnockDir = HitDirection;
 	KnockDir.Z = 0.f;
 	KnockDir.Normalize();

@@ -18,7 +18,8 @@ enum class EAttackType : uint8
 	EAT_None    UMETA(DisplayName = "None"),
 	EAT_Light   UMETA(DisplayName = "Light"),
 	EAT_Heavy   UMETA(DisplayName = "Heavy"),
-	EAT_Air     UMETA(DisplayName = "Air")
+	EAT_Air     UMETA(DisplayName = "Air"),
+	EAT_Rising  UMETA(DisplayName = "Rising")
 };
 
 
@@ -44,6 +45,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void TryAirAttack();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void TryRisingAttack();
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void CancelAttack();
@@ -81,6 +85,18 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Montages")
 	TArray<UAnimMontage*> AirComboMontages;
+
+	/** DMC3 High Time / Rising attack montage (back+attack while locked on). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Montages")
+	UAnimMontage* RisingAttackMontage;
+
+	/** How high the player launches on a rising attack. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Rising Attack")
+	float RisingLaunchForce = 1000.f;
+
+	/** Damage for the rising attack. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Rising Attack")
+	float RisingDamage = 20.f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Trace")
 	float TraceRange = 180.f;

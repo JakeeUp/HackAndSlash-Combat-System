@@ -147,6 +147,11 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
 	float LockOnArmInterpSpeed = 5.f;
 
+	/** Minimum height the camera must stay above the player's feet during lock-on.
+	 *  DMC3 pattern: camera never goes below this height to prevent terrain clipping. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
+	float LockOnMinCameraHeight = 100.f;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Projectile")
 	TSubclassOf<class AHSHomingProjectile> ProjectileClass;
 
@@ -340,6 +345,9 @@ private:
 	/*****************************************************/
 	/*                       Helpers                      */
 	/*****************************************************/
+	/** Returns true when the stick is tilted away from the locked target (back-tilt for rising attack). */
+	bool IsBackTiltInput() const;
+
 	FVector ResolveCameraRelativeInputDirection() const;
 	UAnimMontage* GetDodgeMontage(int32 Index) const;
 	void OnDodgeMontageEnded(UAnimMontage* Montage, bool bInterrupted);

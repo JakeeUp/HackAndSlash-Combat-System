@@ -134,6 +134,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Knockback")
 	float SendFlyingLift = 400.f;
 
+	/** Small upward push applied on every hit while airborne to keep the enemy juggled (DMC style). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Knockback")
+	float AirJuggleLift = 250.f;
+
 	/** Knockback from projectile hits. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Knockback")
 	float ProjectileKnockbackForce = 300.f;

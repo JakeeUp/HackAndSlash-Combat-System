@@ -89,6 +89,31 @@ void UHSCombatComponent::TryAirAttack()
 	}
 }
 
+void UHSCombatComponent::TryRisingAttack()
+{
+	if (!OwnerChar || !RisingAttackMontage) return;
+
+	// Cancel any active attack
+	if (bIsAttacking)
+	{
+		CancelAttack();
+	}
+
+	UAnimInstance* AnimInst = OwnerChar->GetMesh() ? OwnerChar->GetMesh()->GetAnimInstance() : nullptr;
+	if (!AnimInst) return;
+
+	// Face the locked target
+	RotateOwnerToInput();
+
+	AnimInst->Montage_Play(RisingAttackMontage, 1.f);
+
+	bIsAttacking = true;
+	bComboWindowOpen = false;
+	bSavedNextAttack = false;
+	CurrentAttackType = EAttackType::EAT_Rising;
+	ComboIndex = 0;
+}
+
 void UHSCombatComponent::PlayNextAttack(EAttackType Type)
 {
 	if (!OwnerChar) return;
@@ -163,9 +188,10 @@ float UHSCombatComponent::GetDamageForCurrentAttack() const
 {
 	switch (CurrentAttackType)
 	{
-	case EAttackType::EAT_Heavy: return HeavyDamage;
-	case EAttackType::EAT_Air:   return AirDamage;
-	default:                     return LightDamage;
+	case EAttackType::EAT_Heavy:  return HeavyDamage;
+	case EAttackType::EAT_Air:    return AirDamage;
+	case EAttackType::EAT_Rising: return RisingDamage;
+	default:                      return LightDamage;
 	}
 }
 
@@ -309,8 +335,18 @@ void UHSCombatComponent::DoSwordTrace()
 	const float Damage = GetDamageForCurrentAttack();
 	bool bLandedHit = false;
 
-	const bool bIsHeavy = (CurrentAttackType == EAttackType::EAT_Heavy);
 	const FVector HitDir = OwnerChar->GetActorForwardVector();
+
+	// Determine hit weight based on attack type
+	EHitWeight HitWeight = EHitWeight::EHW_Light;
+	if (CurrentAttackType == EAttackType::EAT_Heavy)
+	{
+		HitWeight = EHitWeight::EHW_Heavy;
+	}
+	else if (CurrentAttackType == EAttackType::EAT_Rising)
+	{
+		HitWeight = EHitWeight::EHW_Launcher;
+	}
 
 	for (const FHitResult& Hit : Hits)
 	{
@@ -320,10 +356,8 @@ void UHSCombatComponent::DoSwordTrace()
 
 		if (HitActor->Implements<UHSDamageable>())
 		{
-			// Use the extended damage call with hit direction and attack weight
-			IHSDamageable::Execute_ApplyDamageWithInfo(HitActor, Damage, OwnerChar, HitDir, bIsHeavy);
+			IHSDamageable::Execute_ApplyDamageEx(HitActor, Damage, OwnerChar, HitDir, HitWeight);
 
-			// Feed the style meter
 			if (UHSStyleComponent* Style = OwnerChar->GetStyle())
 			{
 				Style->RegisterHit(Damage);
@@ -331,6 +365,12 @@ void UHSCombatComponent::DoSwordTrace()
 
 			bLandedHit = true;
 		}
+	}
+
+	// Rising attack: launch the player into the air alongside the enemy
+	if (bLandedHit && CurrentAttackType == EAttackType::EAT_Rising)
+	{
+		OwnerChar->LaunchCharacter(FVector(0.f, 0.f, RisingLaunchForce), false, true);
 	}
 
 	// Camera shake on hit (FF16 style impact feel)
