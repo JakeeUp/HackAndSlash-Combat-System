@@ -1,0 +1,22 @@
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.idea/
+*.sln
+*.VC.db
+*.opensdf
+*.opendb
+*.sdf
+*.suo
+*.user
+*.log
+
+# Paid marketplace assets - do not redistribute
+Content/SwordAnimsetPro/
+Content/HomingMissile/
+Content/Megaplant_Library/
+Content/MWLandscapeAutoMaterial/
+Content/StampIt/

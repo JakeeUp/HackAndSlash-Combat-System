@@ -1,0 +1,171 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "HSCombatComponent.generated.h"
+
+
+class UAnimMontage;
+class AHSPlayerCharacter;
+class UCameraShakeBase;
+
+
+UENUM(BlueprintType)
+enum class EAttackType : uint8
+{
+	EAT_None    UMETA(DisplayName = "None"),
+	EAT_Light   UMETA(DisplayName = "Light"),
+	EAT_Heavy   UMETA(DisplayName = "Heavy"),
+	EAT_Air     UMETA(DisplayName = "Air")
+};
+
+
+UCLASS(ClassGroup = (Combat), meta = (BlueprintSpawnableComponent))
+class HACKSLASHMOVEMENT_API UHSCombatComponent : public UActorComponent
+{
+	GENERATED_BODY()
+
+public:
+	// Sets default values for this component's properties
+	UHSCombatComponent();
+
+protected:
+	// Called when the game starts
+	virtual void BeginPlay() override;
+
+public:
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void TryLightAttack();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void TryHeavyAttack();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void TryAirAttack();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void CancelAttack();
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	FORCEINLINE bool IsAttacking() const { return bIsAttacking; }
+
+	/** Called when the character lands -- restores gravity and resets air hit tracking. */
+	void OnOwnerLanded();
+
+	/*****************************************************/
+	/*               Anim Notify Callbacks               */
+	/*****************************************************/
+	UFUNCTION(BlueprintCallable, Category = "Combat|Notifies")
+	void OpenComboWindow();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Notifies")
+	void CloseComboWindow();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Notifies")
+	void OnAttackFinished();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Notifies")
+	void DoSwordTrace();
+
+protected:
+	/*****************************************************/
+	/*                    Configurations                 */
+	/*****************************************************/
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Montages")
+	TArray<UAnimMontage*> LightComboMontages;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Montages")
+	TArray<UAnimMontage*> HeavyComboMontages;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Montages")
+	TArray<UAnimMontage*> AirComboMontages;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Trace")
+	float TraceRange = 180.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Trace")
+	float TraceRadius = 90.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Damage")
+	float LightDamage = 8.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Damage")
+	float HeavyDamage = 18.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Damage")
+	float AirDamage = 10.f;
+
+	/** Gravity scale for the first air hit. Near-zero = full hang like DMC. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Air Combat", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float AirComboBaseGravity = 0.05f;
+
+	/** Extra gravity added per subsequent air hit. DMC3 uses ~0.15 so by hit 4 you're noticeably sinking. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Air Combat")
+	float AirComboGravityPerHit = 0.15f;
+
+	/** Vertical velocity is snapped to this when an air attack starts so the character doesn't keep rising or falling. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Air Combat")
+	float AirComboVerticalVelocitySnap = 0.f;
+
+	/** Camera shake played when a melee attack connects. Light hits use Scale 0.5, heavy hits use 1.0. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake")
+	TSubclassOf<UCameraShakeBase> HitCameraShake;
+
+	/** Scale for light attack camera shake. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake")
+	float LightHitShakeScale = 0.5f;
+
+	/** Scale for heavy attack camera shake. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake")
+	float HeavyHitShakeScale = 1.0f;
+
+	/** Scale for air attack camera shake. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake")
+	float AirHitShakeScale = 0.6f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Debug")
+	bool bDebugDrawTrace = true;
+
+	/*****************************************************/
+	/*                        State                      */
+	/*****************************************************/
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	class AHSPlayerCharacter* OwnerChar;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	bool bIsAttacking = false;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	bool bComboWindowOpen = false;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	bool bSavedNextAttack = false;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	EAttackType CurrentAttackType = EAttackType::EAT_None;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	EAttackType BufferedAttackType = EAttackType::EAT_None;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	int32 ComboIndex = 0;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	bool bAirComboActive = false;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	int32 AirHitCount = 0;
+
+	float SavedGravityScale = 1.f;
+
+private:
+	void PlayNextAttack(EAttackType Type);
+	UAnimMontage* GetMontageForCombo(EAttackType Type, int32 Index) const;
+	float GetDamageForCurrentAttack() const;
+	void ResetCombo();
+
+	/** Snap the owning character toward camera-relative input direction before each swing. */
+	void RotateOwnerToInput();
+};
