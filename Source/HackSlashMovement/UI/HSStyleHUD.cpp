@@ -5,26 +5,45 @@
 
 #include "Character/HSPlayerCharacter.h"
 
-#include "Components/ProgressBar.h"
+#include "Components/Image.h"
 #include "Components/TextBlock.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 
 void UHSStyleHUD::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	// Default rank display names
-	if (RankDisplayNames.Num() == 0)
+	// Default fill colors (DMC gradient: blue tiers → gold tiers)
+	if (RankFillColors.Num() == 0)
 	{
-		RankDisplayNames.Add(EStyleRank::D,   TEXT("D"));
-		RankDisplayNames.Add(EStyleRank::C,   TEXT("C"));
-		RankDisplayNames.Add(EStyleRank::B,   TEXT("B"));
-		RankDisplayNames.Add(EStyleRank::A,   TEXT("A"));
-		RankDisplayNames.Add(EStyleRank::S,   TEXT("S"));
-		RankDisplayNames.Add(EStyleRank::SS,  TEXT("SS"));
-		RankDisplayNames.Add(EStyleRank::SSS, TEXT("SSS"));
+		RankFillColors.Add(EStyleRank::D,   FLinearColor(0.3f, 0.4f, 0.6f));    // Steel blue
+		RankFillColors.Add(EStyleRank::C,   FLinearColor(0.2f, 0.5f, 1.0f));    // Blue
+		RankFillColors.Add(EStyleRank::B,   FLinearColor(0.3f, 0.6f, 1.0f));    // Bright blue
+		RankFillColors.Add(EStyleRank::A,   FLinearColor(0.8f, 0.7f, 0.2f));    // Gold transition
+		RankFillColors.Add(EStyleRank::S,   FLinearColor(1.0f, 0.85f, 0.1f));   // Gold
+		RankFillColors.Add(EStyleRank::SS,  FLinearColor(1.0f, 0.8f, 0.0f));    // Deep gold
+		RankFillColors.Add(EStyleRank::SSS, FLinearColor(1.0f, 0.75f, 0.0f));   // Rich gold
+	}
+
+	if (RankOutlineColors.Num() == 0)
+	{
+		RankOutlineColors.Add(EStyleRank::D,   FLinearColor(0.15f, 0.2f, 0.3f));
+		RankOutlineColors.Add(EStyleRank::C,   FLinearColor(0.1f, 0.25f, 0.5f));
+		RankOutlineColors.Add(EStyleRank::B,   FLinearColor(0.15f, 0.3f, 0.5f));
+		RankOutlineColors.Add(EStyleRank::A,   FLinearColor(0.4f, 0.35f, 0.1f));
+		RankOutlineColors.Add(EStyleRank::S,   FLinearColor(0.5f, 0.42f, 0.05f));
+		RankOutlineColors.Add(EStyleRank::SS,  FLinearColor(0.5f, 0.4f, 0.0f));
+		RankOutlineColors.Add(EStyleRank::SSS, FLinearColor(0.5f, 0.38f, 0.0f));
+	}
+
+	// Create the dynamic material instance for the rank letter
+	if (RankLetterMaterial && RankImage)
+	{
+		RankMaterialInstance = UMaterialInstanceDynamic::Create(RankLetterMaterial, this);
+		RankImage->SetBrushFromMaterial(RankMaterialInstance);
 	}
 
 	// Find the player's style component
@@ -49,10 +68,12 @@ void UHSStyleHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
-	// Update progress bar smoothly
-	if (CachedStyle && RankProgressBar)
+	// Smoothly animate the fill percent on the rank letter
+	if (CachedStyle && RankMaterialInstance)
 	{
-		RankProgressBar->SetPercent(CachedStyle->GetStylePointsNormalized());
+		const float TargetFill = CachedStyle->GetStylePointsNormalized();
+		DisplayedFillPercent = FMath::FInterpTo(DisplayedFillPercent, TargetFill, InDeltaTime, 5.f);
+		RankMaterialInstance->SetScalarParameterValue(TEXT("FillPercent"), DisplayedFillPercent);
 	}
 
 	// Fade combo display after timeout
@@ -65,24 +86,20 @@ void UHSStyleHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 		}
 	}
 
-	// --- FF16 Movement Sway ---
-	// Shift the HUD opposite to the player's horizontal velocity
+	// FF16 Movement Sway
 	FVector2D TargetSway = FVector2D::ZeroVector;
 	if (CachedPlayer)
 	{
 		const FVector Velocity = CachedPlayer->GetVelocity();
-		// Get camera-relative horizontal direction
 		if (APlayerController* PC = Cast<APlayerController>(CachedPlayer->GetController()))
 		{
 			const FRotator CamRot(0.f, PC->GetControlRotation().Yaw, 0.f);
 			const FVector CamRight = FRotationMatrix(CamRot).GetUnitAxis(EAxis::Y);
 			const FVector CamForward = FRotationMatrix(CamRot).GetUnitAxis(EAxis::X);
 
-			// Project velocity onto camera axes and invert (HUD moves opposite)
 			const float RightAmount = FVector::DotProduct(Velocity, CamRight);
 			const float ForwardAmount = FVector::DotProduct(Velocity, CamForward);
 
-			// Normalize by max walk speed so the sway is proportional
 			const float MaxSpeed = CachedPlayer->GetCharacterMovement()->MaxWalkSpeed;
 			if (MaxSpeed > 0.f)
 			{
@@ -94,10 +111,10 @@ void UHSStyleHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 
 	CurrentSwayOffset = FMath::Vector2DInterpTo(CurrentSwayOffset, TargetSway, InDeltaTime, SwayInterpSpeed);
 
-	// --- Scale recovery (slam/pulse snap back to 1.0) ---
+	// Scale recovery (slam/pulse snap back to 1.0)
 	CurrentScale = FMath::FInterpTo(CurrentScale, 1.f, InDeltaTime, ScaleRecoverSpeed);
 
-	// Apply sway + scale to the widget's render transform
+	// Apply sway + scale
 	SetRenderTranslation(FVector2D(CurrentSwayOffset.X, CurrentSwayOffset.Y));
 	SetRenderScale(FVector2D(CurrentScale, CurrentScale));
 }
@@ -112,6 +129,9 @@ void UHSStyleHUD::OnRankChanged(EStyleRank NewRank)
 		CurrentScale = RankSlamScale;
 	}
 	LastRank = NewRank;
+
+	// Reset fill to 0 on rank change so it starts filling fresh
+	DisplayedFillPercent = 0.f;
 }
 
 void UHSStyleHUD::OnComboChanged(int32 NewCount)
@@ -121,13 +141,12 @@ void UHSStyleHUD::OnComboChanged(int32 NewCount)
 		ComboVisibleTimer = ComboFadeDelay;
 		UpdateComboDisplay(NewCount);
 
-		// Hit pulse on every hit
 		if (CurrentScale < HitPulseScale)
 		{
 			CurrentScale = HitPulseScale;
 		}
 
-		// 10-hit milestone slam (DMC style)
+		// 10-hit milestone slam
 		if (NewCount % 10 == 0)
 		{
 			CurrentScale = MilestoneSlamScale;
@@ -135,7 +154,6 @@ void UHSStyleHUD::OnComboChanged(int32 NewCount)
 	}
 	else
 	{
-		// Don't hide immediately -- let the timer handle fade
 		ComboVisibleTimer = 0.5f;
 	}
 
@@ -144,13 +162,26 @@ void UHSStyleHUD::OnComboChanged(int32 NewCount)
 
 void UHSStyleHUD::UpdateRankDisplay()
 {
-	if (!CachedStyle) return;
+	if (!CachedStyle || !RankMaterialInstance) return;
 
 	const EStyleRank Rank = CachedStyle->GetCurrentRank();
 
-	if (RankText)
+	// Swap the letter texture
+	if (const UTexture2D* const* Tex = RankTextures.Find(Rank))
 	{
-		RankText->SetText(FText::FromString(GetRankString(Rank)));
+		RankMaterialInstance->SetTextureParameterValue(TEXT("LetterTexture"), const_cast<UTexture2D*>(*Tex));
+	}
+
+	// Set fill color
+	if (const FLinearColor* Color = RankFillColors.Find(Rank))
+	{
+		RankMaterialInstance->SetVectorParameterValue(TEXT("FillColor"), *Color);
+	}
+
+	// Set outline color
+	if (const FLinearColor* Color = RankOutlineColors.Find(Rank))
+	{
+		RankMaterialInstance->SetVectorParameterValue(TEXT("OutlineColor"), *Color);
 	}
 }
 
@@ -172,26 +203,5 @@ void UHSStyleHUD::UpdateComboDisplay(int32 Count)
 	if (ComboLabel)
 	{
 		ComboLabel->SetVisibility(Count > 0 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-	}
-}
-
-FString UHSStyleHUD::GetRankString(EStyleRank Rank) const
-{
-	if (const FString* Found = RankDisplayNames.Find(Rank))
-	{
-		return *Found;
-	}
-
-	// Fallback
-	switch (Rank)
-	{
-	case EStyleRank::D:   return TEXT("D");
-	case EStyleRank::C:   return TEXT("C");
-	case EStyleRank::B:   return TEXT("B");
-	case EStyleRank::A:   return TEXT("A");
-	case EStyleRank::S:   return TEXT("S");
-	case EStyleRank::SS:  return TEXT("SS");
-	case EStyleRank::SSS: return TEXT("SSS");
-	default:              return TEXT("?");
 	}
 }

@@ -1,6 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "HSDummyEnemy.h"
 
 #include "UI/HSDamageNumber.h"
@@ -9,32 +6,30 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "NiagaraFunctionLibrary.h"
+#include "Sound/SoundBase.h"
 #include "TimerManager.h"
 
-// Sets default values
 AHSDummyEnemy::AHSDummyEnemy()
 {
-	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = false;
 
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.f);
+
+	// Ignore the camera channel so the player's spring arm doesn't collide
+	// with the enemy when attacking up close.
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->MaxWalkSpeed = 0.f;
 }
 
-// Called when the game starts or when spawned
 void AHSDummyEnemy::BeginPlay()
 {
 	Super::BeginPlay();
 
 	CurrentHealth = MaxHealth;
-}
-
-void AHSDummyEnemy::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
 }
 
 void AHSDummyEnemy::Landed(const FHitResult& Hit)
@@ -45,7 +40,19 @@ void AHSDummyEnemy::Landed(const FHitResult& Hit)
 
 	if (EnemyState == EEnemyState::EES_Airborne)
 	{
-		EnemyState = EEnemyState::EES_Idle;
+		bInDropLoop = false;
+
+		if (LandImpactSound)
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, LandImpactSound, GetActorLocation());
+		}
+
+		// Transition to Down -- the ABP state machine handles drop end → getup animations.
+		// After a delay, return to Idle so the getup animation has time to play.
+		EnemyState = EEnemyState::EES_Down;
+
+		GetWorldTimerManager().ClearTimer(GetupTimerHandle);
+		GetWorldTimerManager().SetTimer(GetupTimerHandle, this, &AHSDummyEnemy::PlayGetup, GetupDelay, false);
 	}
 }
 
@@ -53,14 +60,7 @@ void AHSDummyEnemy::PlayGetup()
 {
 	if (bIsDead || EnemyState != EEnemyState::EES_Down) return;
 
-	if (GetupMontage)
-	{
-		if (UAnimInstance* AnimInst = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
-		{
-			AnimInst->Montage_Play(GetupMontage, 1.f);
-		}
-	}
-
+	// Set to Idle -- the ABP state machine transitions through the getup animation
 	EnemyState = EEnemyState::EES_Idle;
 }
 
@@ -73,11 +73,6 @@ void AHSDummyEnemy::ApplyDamage_Implementation(float DamageAmount, AActor* Damag
 		HitDir.Z = 0.f;
 	}
 	HandleHitReaction(DamageAmount, DamageCauser, HitDir, EHitWeight::EHW_Light);
-}
-
-void AHSDummyEnemy::ApplyDamageWithInfo_Implementation(float DamageAmount, AActor* DamageCauser, const FVector& HitDirection, bool bIsHeavyHit)
-{
-	HandleHitReaction(DamageAmount, DamageCauser, HitDirection, bIsHeavyHit ? EHitWeight::EHW_Heavy : EHitWeight::EHW_Light);
 }
 
 void AHSDummyEnemy::ApplyDamageEx_Implementation(float DamageAmount, AActor* DamageCauser, const FVector& HitDirection, EHitWeight HitWeight)
@@ -107,6 +102,28 @@ void AHSDummyEnemy::HandleHitReaction(float DamageAmount, AActor* DamageCauser, 
 
 	const bool bIsProjectile = (HitWeight == EHitWeight::EHW_Light) && DamageCauser && !DamageCauser->IsA(ACharacter::StaticClass());
 
+	// Hit SFX
+	{
+		USoundBase* HitSFX = nullptr;
+		if (HitWeight == EHitWeight::EHW_Launcher || HitWeight == EHitWeight::EHW_Finisher)
+		{
+			HitSFX = LaunchSound;
+		}
+		else if (bIsHeavy)
+		{
+			HitSFX = HeavyHitSound;
+		}
+		else
+		{
+			HitSFX = LightHitSound;
+		}
+
+		if (HitSFX)
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, HitSFX, GetActorLocation());
+		}
+	}
+
 	// Hit VFX
 	SpawnHitVFX(HitDirection, bIsProjectile);
 
@@ -116,17 +133,29 @@ void AHSDummyEnemy::HandleHitReaction(float DamageAmount, AActor* DamageCauser, 
 	// Hitstop
 	ApplyHitstop(HitWeight);
 
-	// Hit react animation -- pick montage based on enemy state
+	// Hit react animation -- pick montage based on enemy state.
+	// Launcher hits skip the montage entirely -- the ABP state machine
+	// handles the HitStart → DropLoop transition for a clean launch look.
 	UAnimMontage* ReactMontage = nullptr;
+	const bool bIsLauncher = (HitWeight == EHitWeight::EHW_Launcher);
 
-	if (EnemyState == EEnemyState::EES_Airborne && AirHitReactMontage)
+	if (bIsLauncher)
 	{
-		ReactMontage = AirHitReactMontage;
+		// No montage -- let the ABP HitStart state handle the launch animation.
+		// Just clear the drop loop flag so the state machine starts fresh.
+		bInDropLoop = false;
+	}
+	else if (EnemyState == EEnemyState::EES_Airborne && AirHitReactMontages.Num() > 0)
+	{
+		// Stop any active drop loop -- enemy is getting hit again
+		bInDropLoop = false;
+
+		const int32 Idx = FMath::RandRange(0, AirHitReactMontages.Num() - 1);
+		ReactMontage = AirHitReactMontages[Idx];
 	}
 	else if (EnemyState == EEnemyState::EES_Down && DownHitReactMontages.Num() > 0)
 	{
-		// Cancel pending sequence -- they're getting hit while down
-		GetWorldTimerManager().ClearTimer(DropEndTimerHandle);
+		// Cancel pending getup -- they're getting hit while down
 		GetWorldTimerManager().ClearTimer(GetupTimerHandle);
 		const int32 Idx = FMath::RandRange(0, DownHitReactMontages.Num() - 1);
 		ReactMontage = DownHitReactMontages[Idx];
@@ -142,16 +171,20 @@ void AHSDummyEnemy::HandleHitReaction(float DamageAmount, AActor* DamageCauser, 
 		const int32 Idx = FMath::RandRange(0, LightHitReactMontages.Num() - 1);
 		ReactMontage = LightHitReactMontages[Idx];
 	}
-	else if (HitReactMontage)
-	{
-		ReactMontage = HitReactMontage;
-	}
 
 	if (ReactMontage)
 	{
 		if (UAnimInstance* AnimInst = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
 		{
 			AnimInst->Montage_Play(ReactMontage, HitReactPlayRate);
+
+			// When an air hit react ends, transition to drop loop if still airborne
+			if (EnemyState == EEnemyState::EES_Airborne)
+			{
+				FOnMontageEnded EndDelegate;
+				EndDelegate.BindUObject(this, &AHSDummyEnemy::OnAirHitReactEnded);
+				AnimInst->Montage_SetEndDelegate(EndDelegate, ReactMontage);
+			}
 		}
 	}
 
@@ -273,6 +306,25 @@ void AHSDummyEnemy::EndHitstop()
 		MeshComp->GlobalAnimRateScale = 1.f;
 	}
 	CustomTimeDilation = 1.f;
+}
+
+void AHSDummyEnemy::OnAirHitReactEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	// If interrupted (got hit again), don't start the drop loop
+	if (bInterrupted) return;
+
+	// If still airborne after the hit react, set the drop loop flag.
+	// The ABP state machine reads this and plays the looping fall animation.
+	if (EnemyState == EEnemyState::EES_Airborne)
+	{
+		bInDropLoop = true;
+	}
+}
+
+void AHSDummyEnemy::StartDropLoop()
+{
+	if (bIsDead) return;
+	bInDropLoop = true;
 }
 
 void AHSDummyEnemy::Die()

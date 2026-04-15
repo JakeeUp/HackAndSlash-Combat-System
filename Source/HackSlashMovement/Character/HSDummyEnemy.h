@@ -1,5 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -11,6 +9,7 @@
 class UAnimMontage;
 class AHSDamageNumber;
 class UNiagaraSystem;
+class USoundBase;
 
 
 UENUM(BlueprintType)
@@ -28,23 +27,19 @@ class HACKSLASHMOVEMENT_API AHSDummyEnemy : public ACharacter, public IHSDamagea
 	GENERATED_BODY()
 
 public:
-	// Sets default values for this character's properties
 	AHSDummyEnemy();
 
 protected:
-	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
 public:
-	virtual void Tick(float DeltaTime) override;
 	virtual void Landed(const FHitResult& Hit) override;
 
 	UFUNCTION(BlueprintPure, Category = "State")
 	FORCEINLINE EEnemyState GetEnemyState() const { return EnemyState; }
 
-	//IHSDamageable
+	// IHSDamageable
 	virtual void ApplyDamage_Implementation(float DamageAmount, AActor* DamageCauser) override;
-	virtual void ApplyDamageWithInfo_Implementation(float DamageAmount, AActor* DamageCauser, const FVector& HitDirection, bool bIsHeavyHit) override;
 	virtual void ApplyDamageEx_Implementation(float DamageAmount, AActor* DamageCauser, const FVector& HitDirection, EHitWeight HitWeight) override;
 
 	UFUNCTION(BlueprintPure, Category = "State")
@@ -52,6 +47,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "State")
 	bool IsDead() const { return bIsDead; }
+
+	UFUNCTION(BlueprintPure, Category = "State")
+	FORCEINLINE bool IsInDropLoop() const { return bInDropLoop; }
 
 protected:
 	/*****************************************************/
@@ -68,29 +66,13 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Hit React")
 	UAnimMontage* HeavyHitReactMontage;
 
-	/** Fallback single montage (backwards compat). */
+	/** Hit react montages when the enemy is airborne (juggled). Picks randomly for variety. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Hit React")
-	UAnimMontage* HitReactMontage;
-
-	/** Hit react when the enemy is airborne (juggled). */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Hit React")
-	UAnimMontage* AirHitReactMontage;
+	TArray<UAnimMontage*> AirHitReactMontages;
 
 	/** Hit react when the enemy is lying on the ground. Picks randomly. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Hit React")
 	TArray<UAnimMontage*> DownHitReactMontages;
-
-	/** Montage for getting up after being knocked down. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Hit React")
-	UAnimMontage* GetupMontage;
-
-	/** Montage played when the enemy hits the ground after being airborne. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Hit React")
-	UAnimMontage* HitDropMontage;
-
-	/** End/settle montage after the drop impact (plays between drop and getup). */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Hit React")
-	UAnimMontage* HitDropEndMontage;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Hit React")
 	UAnimMontage* DeathMontage;
@@ -181,6 +163,26 @@ protected:
 	FVector DamageNumberOffset = FVector(0.f, 0.f, 100.f);
 
 	/*****************************************************/
+	/*                    Hit SFX                        */
+	/*****************************************************/
+
+	/** Sound played when the enemy takes a light hit. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* LightHitSound;
+
+	/** Sound played when the enemy takes a heavy hit. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* HeavyHitSound;
+
+	/** Sound played when the enemy gets launched into the air. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* LaunchSound;
+
+	/** Sound when the enemy hits the ground after being airborne. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* LandImpactSound;
+
+	/*****************************************************/
 	/*                        State                      */
 	/*****************************************************/
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
@@ -192,8 +194,8 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
 	EEnemyState EnemyState = EEnemyState::EES_Idle;
 
-	/** True when the enemy was launched by a Launcher/Finisher (triggers HitDrop+Getup on landing). */
-	bool bWasLaunched = false;
+	/** True while the hit drop loop montage is playing (enemy falling after air combo). */
+	bool bInDropLoop = false;
 
 private:
 	void Die();
@@ -202,9 +204,16 @@ private:
 	void ApplyKnockback(const FVector& HitDirection, EHitWeight HitWeight, bool bIsProjectile);
 	void ApplyHitstop(EHitWeight HitWeight);
 	void EndHitstop();
+
+	/** Start the looping fall animation after an air hit react finishes. */
+	void StartDropLoop();
+
+	/** Called when an air hit react montage ends -- sets drop loop flag if still airborne. */
+	void OnAirHitReactEnded(UAnimMontage* Montage, bool bInterrupted);
+
+	/** Timer callback -- sets state back to Idle after landing. */
 	void PlayGetup();
 
 	FTimerHandle HitstopTimerHandle;
-	FTimerHandle DropEndTimerHandle;
 	FTimerHandle GetupTimerHandle;
 };

@@ -1,5 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -23,22 +21,16 @@ class UHSDamageable : public UInterface
 	GENERATED_BODY()
 };
 
-/**
- *
- */
 class HACKSLASHMOVEMENT_API IHSDamageable
 {
 	GENERATED_BODY()
 
 public:
+	/** Basic damage with no directional info. Used by projectiles. */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Damage")
 	void ApplyDamage(float DamageAmount, AActor* DamageCauser);
 
-	/** Extended version with hit direction and attack info for knockback/VFX. */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Damage")
-	void ApplyDamageWithInfo(float DamageAmount, AActor* DamageCauser, const FVector& HitDirection, bool bIsHeavyHit);
-
-	/** Full version with hit weight enum for launchers, finishers, etc. */
+	/** Full damage with direction and hit weight for knockback, VFX, and hit reacts. */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Damage")
 	void ApplyDamageEx(float DamageAmount, AActor* DamageCauser, const FVector& HitDirection, EHitWeight HitWeight);
 };

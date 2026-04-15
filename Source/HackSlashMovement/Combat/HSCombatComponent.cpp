@@ -1,6 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "HSCombatComponent.h"
 
 #include "Character/HSPlayerCharacter.h"
@@ -9,19 +6,21 @@
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Sound/SoundBase.h"
+#include "TimerManager.h"
 
-// Sets default values for this component's properties
 UHSCombatComponent::UHSCombatComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 }
 
-// Called when the game starts
 void UHSCombatComponent::BeginPlay()
 {
 	Super::BeginPlay();
@@ -112,6 +111,8 @@ void UHSCombatComponent::TryRisingAttack()
 	bSavedNextAttack = false;
 	CurrentAttackType = EAttackType::EAT_Rising;
 	ComboIndex = 0;
+
+	PlaySwingSound();
 }
 
 void UHSCombatComponent::PlayNextAttack(EAttackType Type)
@@ -166,6 +167,8 @@ void UHSCombatComponent::PlayNextAttack(EAttackType Type)
 	bSavedNextAttack = false;
 	CurrentAttackType = Type;
 	ComboIndex++;
+
+	PlaySwingSound();
 }
 
 UAnimMontage* UHSCombatComponent::GetMontageForCombo(EAttackType Type, int32 Index) const
@@ -373,6 +376,18 @@ void UHSCombatComponent::DoSwordTrace()
 		OwnerChar->LaunchCharacter(FVector(0.f, 0.f, RisingLaunchForce), false, true);
 	}
 
+	// Hit SFX
+	if (bLandedHit)
+	{
+		PlayHitSound();
+	}
+
+	// Screen flash + time dilation on rising/launcher hits only
+	if (bLandedHit && CurrentAttackType == EAttackType::EAT_Rising)
+	{
+		ApplyScreenHitEffect();
+	}
+
 	// Camera shake on hit (FF16 style impact feel)
 	if (bLandedHit && HitCameraShake)
 	{
@@ -384,5 +399,76 @@ void UHSCombatComponent::DoSwordTrace()
 		{
 			PC->ClientStartCameraShake(HitCameraShake, ShakeScale);
 		}
+	}
+}
+
+void UHSCombatComponent::PlaySwingSound()
+{
+	if (!OwnerChar) return;
+
+	USoundBase* Sound = nullptr;
+	switch (CurrentAttackType)
+	{
+	case EAttackType::EAT_Light:  Sound = LightSwingSound;  break;
+	case EAttackType::EAT_Heavy:  Sound = HeavySwingSound;  break;
+	case EAttackType::EAT_Air:    Sound = AirSwingSound;    break;
+	case EAttackType::EAT_Rising: Sound = RisingSwingSound; break;
+	default: break;
+	}
+
+	if (Sound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, Sound, OwnerChar->GetActorLocation());
+	}
+}
+
+void UHSCombatComponent::PlayHitSound()
+{
+	if (!OwnerChar) return;
+
+	USoundBase* Sound = nullptr;
+	switch (CurrentAttackType)
+	{
+	case EAttackType::EAT_Light:  Sound = LightHitSound;  break;
+	case EAttackType::EAT_Heavy:  Sound = HeavyHitSound;  break;
+	case EAttackType::EAT_Air:    Sound = AirHitSound;    break;
+	case EAttackType::EAT_Rising: Sound = RisingHitSound; break;
+	default: break;
+	}
+
+	if (Sound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, Sound, OwnerChar->GetActorLocation());
+	}
+}
+
+void UHSCombatComponent::ApplyScreenHitEffect()
+{
+	if (!OwnerChar) return;
+
+	APlayerController* PC = Cast<APlayerController>(OwnerChar->GetController());
+	if (!PC) return;
+
+	// White screen flash (FF16 style)
+	if (APlayerCameraManager* CamMgr = PC->PlayerCameraManager)
+	{
+		CamMgr->StartCameraFade(HeavyHitFlashIntensity, 0.f, HeavyHitFlashDuration, FLinearColor::White, false, true);
+	}
+
+	// Brief time dilation for dramatic impact (DMC3/FF16 style)
+	if (UWorld* World = GetWorld())
+	{
+		UGameplayStatics::SetGlobalTimeDilation(World, HitTimeDilationScale);
+
+		World->GetTimerManager().ClearTimer(TimeDilationHandle);
+		World->GetTimerManager().SetTimer(TimeDilationHandle, this, &UHSCombatComponent::RestoreTimeDilation, HitTimeDilationDuration, false);
+	}
+}
+
+void UHSCombatComponent::RestoreTimeDilation()
+{
+	if (UWorld* World = GetWorld())
+	{
+		UGameplayStatics::SetGlobalTimeDilation(World, 1.f);
 	}
 }

@@ -1,5 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,6 +8,7 @@
 class UAnimMontage;
 class AHSPlayerCharacter;
 class UCameraShakeBase;
+class USoundBase;
 
 
 UENUM(BlueprintType)
@@ -29,11 +28,9 @@ class HACKSLASHMOVEMENT_API UHSCombatComponent : public UActorComponent
 	GENERATED_BODY()
 
 public:
-	// Sets default values for this component's properties
 	UHSCombatComponent();
 
 protected:
-	// Called when the game starts
 	virtual void BeginPlay() override;
 
 public:
@@ -141,6 +138,62 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake")
 	float AirHitShakeScale = 0.6f;
 
+	/*****************************************************/
+	/*                    Sound Effects                  */
+	/*****************************************************/
+
+	/** Sword swing whoosh for light attacks. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* LightSwingSound;
+
+	/** Sword swing whoosh for heavy attacks. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* HeavySwingSound;
+
+	/** Sword swing for air attacks. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* AirSwingSound;
+
+	/** Rising attack swing sound. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* RisingSwingSound;
+
+	/** Impact sound when a light attack connects. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* LightHitSound;
+
+	/** Impact sound when a heavy attack connects. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* HeavyHitSound;
+
+	/** Impact sound for air hits. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* AirHitSound;
+
+	/** Impact sound for the rising/launcher attack. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* RisingHitSound;
+
+	/*****************************************************/
+	/*               Screen Hit Effects                  */
+	/*****************************************************/
+
+	/** Brief white screen flash on heavy/rising hits (FF16 impact feel). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Screen Effects")
+	float HeavyHitFlashIntensity = 0.3f;
+
+	/** How fast the screen flash fades out. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Screen Effects")
+	float HeavyHitFlashDuration = 0.12f;
+
+	/** Time dilation applied on launcher/finisher hits for dramatic impact. 0.1 = near freeze. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Screen Effects", meta = (ClampMin = "0.01", ClampMax = "1.0"))
+	float HitTimeDilationScale = 0.15f;
+
+	/** How long the time dilation lasts (real seconds). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Screen Effects")
+	float HitTimeDilationDuration = 0.08f;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Debug")
 	bool bDebugDrawTrace = true;
 
@@ -184,4 +237,18 @@ private:
 
 	/** Snap the owning character toward camera-relative input direction before each swing. */
 	void RotateOwnerToInput();
+
+	/** Play the swing sound for the current attack type. */
+	void PlaySwingSound();
+
+	/** Play the hit sound for the current attack type. */
+	void PlayHitSound();
+
+	/** Screen flash + time dilation for heavy/rising hits. */
+	void ApplyScreenHitEffect();
+
+	/** Restore time dilation after hit freeze. */
+	void RestoreTimeDilation();
+
+	FTimerHandle TimeDilationHandle;
 };

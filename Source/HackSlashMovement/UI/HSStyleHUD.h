@@ -9,6 +9,8 @@
 
 
 class AHSPlayerCharacter;
+class UMaterialInterface;
+class UMaterialInstanceDynamic;
 
 
 UCLASS()
@@ -25,9 +27,9 @@ protected:
 	/*       Bind these to your WBP widgets              */
 	/*****************************************************/
 
-	/** The big style rank letter (D, C, B, A, S, SS, SSS). Bind to a Text widget. */
+	/** Image widget that displays the rank letter with fill effect. */
 	UPROPERTY(meta = (BindWidget))
-	class UTextBlock* RankText;
+	class UImage* RankImage;
 
 	/** Combo hit counter number. Bind to a Text widget. */
 	UPROPERTY(meta = (BindWidget))
@@ -37,17 +39,25 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	class UTextBlock* ComboLabel;
 
-	/** Progress bar showing how close you are to the next rank. Bind to a ProgressBar widget. */
-	UPROPERTY(meta = (BindWidget))
-	class UProgressBar* RankProgressBar;
-
 	/*****************************************************/
 	/*                   Config                          */
 	/*****************************************************/
 
-	/** Map of rank enum to display string. */
-	UPROPERTY(EditDefaultsOnly, Category = "Style HUD")
-	TMap<EStyleRank, FString> RankDisplayNames;
+	/** Base material with FillPercent, FillColor, LetterTexture parameters. Create this in the editor. */
+	UPROPERTY(EditDefaultsOnly, Category = "Style HUD|Rank Letter")
+	UMaterialInterface* RankLetterMaterial;
+
+	/** White letter PNG for each rank. */
+	UPROPERTY(EditDefaultsOnly, Category = "Style HUD|Rank Letter")
+	TMap<EStyleRank, UTexture2D*> RankTextures;
+
+	/** Fill color per rank (D/C = steel blue, S+ = gold). */
+	UPROPERTY(EditDefaultsOnly, Category = "Style HUD|Rank Letter")
+	TMap<EStyleRank, FLinearColor> RankFillColors;
+
+	/** Outline color per rank. */
+	UPROPERTY(EditDefaultsOnly, Category = "Style HUD|Rank Letter")
+	TMap<EStyleRank, FLinearColor> RankOutlineColors;
 
 	/** How long the combo counter stays visible after the last hit. */
 	UPROPERTY(EditDefaultsOnly, Category = "Style HUD")
@@ -92,8 +102,12 @@ private:
 	UPROPERTY()
 	AHSPlayerCharacter* CachedPlayer;
 
+	UPROPERTY()
+	UMaterialInstanceDynamic* RankMaterialInstance;
+
 	float ComboVisibleTimer = 0.f;
 	int32 LastComboCount = 0;
+	float DisplayedFillPercent = 0.f;
 
 	// Sway state
 	FVector2D CurrentSwayOffset = FVector2D::ZeroVector;
@@ -110,6 +124,4 @@ private:
 
 	void UpdateRankDisplay();
 	void UpdateComboDisplay(int32 Count);
-
-	FString GetRankString(EStyleRank Rank) const;
 };

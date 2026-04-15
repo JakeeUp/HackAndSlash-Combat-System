@@ -1,6 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "HSPlayerCharacter.h"
 
 #include "EnhancedInputSubsystems.h"
@@ -24,13 +21,12 @@
 #include "UI/HSLockOnReticle.h"
 #include "Components/WidgetComponent.h"
 
-// Sets default values
 AHSPlayerCharacter::AHSPlayerCharacter()
 {
- 	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.f);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
@@ -60,8 +56,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	CameraBoom->TargetArmLength = 400.f;
 	CameraBoom->SocketOffset = FVector(0.f, 40.f, 60.f);
 	CameraBoom->bUsePawnControlRotation = true;
-	CameraBoom->bDoCollisionTest = true;
-	CameraBoom->ProbeSize = 20.f;
+	CameraBoom->bDoCollisionTest = false;
 
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
@@ -78,10 +73,12 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	Style = CreateDefaultSubobject<UHSStyleComponent>(TEXT("Style"));
 }
 
-// Called when the game starts or when spawned
 void AHSPlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	CurrentHealth = MaxHealth;
+	CurrentMP = MaxMP;
 
 	if (APlayerController* PC = Cast<APlayerController>(Controller))
 	{
@@ -101,7 +98,6 @@ void AHSPlayerCharacter::BeginPlay()
 			DesiredArmLength = CameraBoom->TargetArmLength;
 		}
 
-		// Spawn the style HUD widget
 		if (StyleHUDClass)
 		{
 			UUserWidget* HUD = CreateWidget<UUserWidget>(PC, StyleHUDClass);
@@ -110,10 +106,18 @@ void AHSPlayerCharacter::BeginPlay()
 				HUD->AddToViewport();
 			}
 		}
+
+		if (PlayerHUDClass)
+		{
+			UUserWidget* HUD = CreateWidget<UUserWidget>(PC, PlayerHUDClass);
+			if (HUD)
+			{
+				HUD->AddToViewport();
+			}
+		}
 	}
 }
 
-// Called every frame
 void AHSPlayerCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -192,7 +196,6 @@ void AHSPlayerCharacter::Tick(float DeltaTime)
 	}
 }
 
-// Called to bind functionality to input
 void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
@@ -435,11 +438,10 @@ AActor* AHSPlayerCharacter::FindLockOnTarget() const
 
 void AHSPlayerCharacter::FireProjectile()
 {
-	if (!ProjectileClass)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FireProjectile: No ProjectileClass set!"));
-		return;
-	}
+	if (!ProjectileClass) return;
+	if (CurrentMP < ProjectileMPCost) return;
+
+	CurrentMP = FMath::Max(0.f, CurrentMP - ProjectileMPCost);
 
 	// If locked on, always home toward the locked target.
 	// Otherwise, look for a nearby enemy -- if none found, fire straight forward.

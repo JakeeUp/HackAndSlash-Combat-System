@@ -1,5 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -27,24 +25,15 @@ class HACKSLASHMOVEMENT_API AHSPlayerCharacter : public ACharacter
 	GENERATED_BODY()
 
 public:
-	// Sets default values for this character's properties
 	AHSPlayerCharacter();
 
 protected:
-	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
 public:
-	// Called every frame
 	virtual void Tick(float DeltaTime) override;
-
-	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
-
-	// Reset air dodge counter when we touch ground
 	virtual void Landed(const FHitResult& Hit) override;
-
-	// Re-attach weapon mesh to the configured socket. Runs in editor + at runtime.
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -87,12 +76,36 @@ public:
 	UFUNCTION(BlueprintPure, Category = "State")
 	FORCEINLINE FVector2D GetMoveInputCached() const { return moveInputCached; }
 
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	FORCEINLINE float GetCurrentHealth() const { return CurrentHealth; }
+
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	FORCEINLINE float GetMaxHealth() const { return MaxHealth; }
+
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	float GetHealthPercent() const { return (MaxHealth > 0.f) ? (CurrentHealth / MaxHealth) : 0.f; }
+
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	FORCEINLINE float GetCurrentMP() const { return CurrentMP; }
+
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	FORCEINLINE float GetMaxMP() const { return MaxMP; }
+
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	float GetMPPercent() const { return (MaxMP > 0.f) ? (CurrentMP / MaxMP) : 0.f; }
+
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	FORCEINLINE int32 GetPlayerLevel() const { return PlayerLevel; }
+
 protected:
 	/*****************************************************/
 	/*                    Configurations                 */
 	/*****************************************************/
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|HUD")
 	TSubclassOf<UUserWidget> StyleHUDClass;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|HUD")
+	TSubclassOf<UUserWidget> PlayerHUDClass;
 
 	/** Max distance to find a lock-on target. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
@@ -157,6 +170,10 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Projectile")
 	float ProjectileDamage = 15.f;
+
+	/** MP cost per projectile cast. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Projectile")
+	float ProjectileMPCost = 30.f;
 
 	/** Offset from actor location where the projectile spawns. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Projectile")
@@ -228,6 +245,25 @@ protected:
 	/** Blend-out time when dodge is canceled by movement input. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Dodge")
 	float DodgeCancelBlendOut = 0.15f;
+
+	/*****************************************************/
+	/*                    Player Stats                   */
+	/*****************************************************/
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Stats", meta = (ClampMin = "1"))
+	float MaxHealth = 1000.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Stats", meta = (ClampMin = "1"))
+	float MaxMP = 300.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Stats", meta = (ClampMin = "1"))
+	int32 PlayerLevel = 1;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Stats")
+	float CurrentHealth = 0.f;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Stats")
+	float CurrentMP = 0.f;
 
 	/*****************************************************/
 	/*                        State                      */
