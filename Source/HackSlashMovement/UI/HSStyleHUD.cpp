@@ -30,13 +30,16 @@ void UHSStyleHUD::NativeConstruct()
 
 	if (RankOutlineColors.Num() == 0)
 	{
-		RankOutlineColors.Add(EStyleRank::D,   FLinearColor(0.15f, 0.2f, 0.3f));
-		RankOutlineColors.Add(EStyleRank::C,   FLinearColor(0.1f, 0.25f, 0.5f));
-		RankOutlineColors.Add(EStyleRank::B,   FLinearColor(0.15f, 0.3f, 0.5f));
-		RankOutlineColors.Add(EStyleRank::A,   FLinearColor(0.4f, 0.35f, 0.1f));
-		RankOutlineColors.Add(EStyleRank::S,   FLinearColor(0.5f, 0.42f, 0.05f));
-		RankOutlineColors.Add(EStyleRank::SS,  FLinearColor(0.5f, 0.4f, 0.0f));
-		RankOutlineColors.Add(EStyleRank::SSS, FLinearColor(0.5f, 0.38f, 0.0f));
+		// Per-rank dark-complement outlines: darker, slightly-shifted sibling of
+		// each rank's fill color. Keeps the cool → warm gradient alive without
+		// making outlines fight the fill.
+		RankOutlineColors.Add(EStyleRank::D,   FLinearColor(0.08f, 0.1f, 0.15f));   // dark slate
+		RankOutlineColors.Add(EStyleRank::C,   FLinearColor(0.05f, 0.1f, 0.2f));    // dark navy
+		RankOutlineColors.Add(EStyleRank::B,   FLinearColor(0.05f, 0.12f, 0.25f));  // deep blue
+		RankOutlineColors.Add(EStyleRank::A,   FLinearColor(0.2f, 0.15f, 0.02f));   // dark amber
+		RankOutlineColors.Add(EStyleRank::S,   FLinearColor(0.25f, 0.18f, 0.0f));   // dark gold
+		RankOutlineColors.Add(EStyleRank::SS,  FLinearColor(0.3f, 0.2f, 0.0f));     // bronze
+		RankOutlineColors.Add(EStyleRank::SSS, FLinearColor(0.35f, 0.2f, 0.0f));    // deep bronze
 	}
 
 	// Create the dynamic material instance for the rank letter

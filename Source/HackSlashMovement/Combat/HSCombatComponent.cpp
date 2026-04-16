@@ -162,6 +162,40 @@ void UHSCombatComponent::PlayNextAttack(EAttackType Type)
 
 	AnimInst->Montage_Play(Montage, 1.f);
 
+	// Step-in: small forward nudge per swing so the player tracks the enemy
+	// through the combo instead of rooting in place. Skip on rising attack
+	// (it already launches vertically) and on air combos if configured.
+	if (AttackStepInForce > 0.f && Type != EAttackType::EAT_Rising)
+	{
+		if (UCharacterMovementComponent* Movement = OwnerChar->GetCharacterMovement())
+		{
+			const bool bGrounded = !Movement->IsFalling();
+			if (bGrounded || !bStepInGroundedOnly)
+			{
+				bool bAllow = true;
+
+				// If locked on and already close, skip the step-in so we don't
+				// shove through the target.
+				if (AActor* Target = OwnerChar->GetLockedTarget())
+				{
+					const float Dist = FVector::Dist2D(OwnerChar->GetActorLocation(), Target->GetActorLocation());
+					if (Dist < StepInMaxLockOnRange * 0.5f)
+					{
+						bAllow = false;
+					}
+				}
+
+				if (bAllow)
+				{
+					const FVector Forward = OwnerChar->GetActorForwardVector() * AttackStepInForce;
+					// XYOverride = true so the step replaces residual horizontal velocity,
+					// but preserve Z so jump/air state isn't affected.
+					OwnerChar->LaunchCharacter(Forward, true, false);
+				}
+			}
+		}
+	}
+
 	bIsAttacking = true;
 	bComboWindowOpen = false;
 	bSavedNextAttack = false;
@@ -202,6 +236,10 @@ void UHSCombatComponent::OpenComboWindow()
 {
 	bComboWindowOpen = true;
 
+	// In strict-finish mode we don't early-fire the buffer here; we wait for the
+	// montage to fully play out and fire the buffered attack in OnAttackFinished.
+	if (bStrictFinishBeforeChain) return;
+
 	if (bSavedNextAttack)
 	{
 		const EAttackType Next = BufferedAttackType;
@@ -218,6 +256,17 @@ void UHSCombatComponent::CloseComboWindow()
 
 void UHSCombatComponent::OnAttackFinished()
 {
+	// Strict-finish mode: if a buffered attack is waiting, play it now that the
+	// current animation has fully completed, keeping the current combo index.
+	if (bStrictFinishBeforeChain && bSavedNextAttack)
+	{
+		const EAttackType Next = BufferedAttackType;
+		bSavedNextAttack = false;
+		BufferedAttackType = EAttackType::EAT_None;
+		PlayNextAttack(Next);
+		return;
+	}
+
 	ResetCombo();
 }
 
@@ -340,15 +389,33 @@ void UHSCombatComponent::DoSwordTrace()
 
 	const FVector HitDir = OwnerChar->GetActorForwardVector();
 
-	// Determine hit weight based on attack type
+	// Determine hit weight based on attack type AND combo position.
+	// Mid-combo swings send a mild hit so the enemy staggers but stays in range;
+	// only the final swing of a string actually knocks them back / flings them.
+	// ComboIndex was already incremented at the end of PlayNextAttack, so if
+	// GetMontageForCombo(Type, ComboIndex) returns null the swing we're tracing
+	// right now is the last in that combo.
+	const bool bIsFinalInCombo = (GetMontageForCombo(CurrentAttackType, ComboIndex) == nullptr);
+
 	EHitWeight HitWeight = EHitWeight::EHW_Light;
-	if (CurrentAttackType == EAttackType::EAT_Heavy)
-	{
-		HitWeight = EHitWeight::EHW_Heavy;
-	}
-	else if (CurrentAttackType == EAttackType::EAT_Rising)
+	if (CurrentAttackType == EAttackType::EAT_Rising)
 	{
 		HitWeight = EHitWeight::EHW_Launcher;
+	}
+	else if (CurrentAttackType == EAttackType::EAT_Heavy)
+	{
+		// Mid-combo heavy: light-weight pushback. Final heavy: big finisher that flings.
+		HitWeight = bIsFinalInCombo ? EHitWeight::EHW_Finisher : EHitWeight::EHW_Light;
+	}
+	else if (CurrentAttackType == EAttackType::EAT_Light)
+	{
+		// Mid-combo light: tiny push. Final light: a heavier stagger to finish the string.
+		HitWeight = bIsFinalInCombo ? EHitWeight::EHW_Heavy : EHitWeight::EHW_Light;
+	}
+	else if (CurrentAttackType == EAttackType::EAT_Air)
+	{
+		// Air combos keep enemy juggled; final air hit slams them down.
+		HitWeight = bIsFinalInCombo ? EHitWeight::EHW_Finisher : EHitWeight::EHW_Light;
 	}
 
 	for (const FHitResult& Hit : Hits)

@@ -92,17 +92,17 @@ protected:
 	/*                    Knockback                      */
 	/*****************************************************/
 
-	/** How far the enemy gets pushed back on a light hit. */
+	/** How far the enemy gets pushed back on a light hit (tiny stagger, mid-combo). */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Knockback")
-	float LightKnockbackForce = 400.f;
+	float LightKnockbackForce = 120.f;
 
-	/** How far the enemy gets pushed back on a heavy hit. */
+	/** How far the enemy gets pushed back on a heavy hit (used on last light-combo swing). */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Knockback")
-	float HeavyKnockbackForce = 800.f;
+	float HeavyKnockbackForce = 450.f;
 
-	/** Vertical lift on heavy knockback (DMC launcher feel). */
+	/** Vertical lift on heavy knockback. 0 = horizontal-only stagger; raise for a DMC "pop up" feel. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Knockback")
-	float HeavyKnockbackLift = 200.f;
+	float HeavyKnockbackLift = 0.f;
 
 	/** Vertical launch force when hit by a launcher attack (Rising / combo_03_02). */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Knockback")

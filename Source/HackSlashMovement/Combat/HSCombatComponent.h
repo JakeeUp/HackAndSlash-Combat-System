@@ -197,6 +197,23 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Debug")
 	bool bDebugDrawTrace = true;
 
+	/** When true, buffered inputs only fire after the current montage fully ends (OnAttackFinished).
+	 *  When false (DMC default), buffered inputs fire as soon as OpenComboWindow is hit by an anim notify. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Combo")
+	bool bStrictFinishBeforeChain = false;
+
+	/** Forward nudge applied to the player at the start of each swing so combos stay in range of the enemy. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Combo")
+	float AttackStepInForce = 450.f;
+
+	/** Step-in force only applies while grounded (avoids turning air combos into forward dives). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Combo")
+	bool bStepInGroundedOnly = true;
+
+	/** Max distance at which step-in still applies when locked on. Prevents teleporting through a far target. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Combo")
+	float StepInMaxLockOnRange = 350.f;
+
 	/*****************************************************/
 	/*                        State                      */
 	/*****************************************************/
