@@ -35,6 +35,7 @@ public:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual void Landed(const FHitResult& Hit) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void OnJumped_Implementation() override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	class USpringArmComponent* CameraBoom;
@@ -66,6 +67,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "State")
 	FORCEINLINE bool IsDodging() const { return bIsDodging; }
+
+	UFUNCTION(BlueprintPure, Category = "State")
+	FORCEINLINE bool IsDoubleJumping() const { return bIsDoubleJumping; }
 
 	UFUNCTION(BlueprintPure, Category = "State")
 	FORCEINLINE UHSCombatComponent* GetCombat() const { return Combat; }
@@ -281,6 +285,10 @@ protected:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
 	int32 AirDodgesUsed = 0;
+
+	/** True for the duration of the second (air) jump until landing. Drives the double-jump ABP state. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	bool bIsDoubleJumping = false;
 
 private:
 	/*****************************************************/

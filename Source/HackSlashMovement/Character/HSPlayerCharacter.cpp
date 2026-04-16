@@ -51,6 +51,9 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	Movement->AirControlBoostVelocityThreshold = 25.f;
 	Movement->FallingLateralFriction = 1.5f;
 
+	// Double jump
+	JumpMaxCount = 2;
+
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
 	CameraBoom->TargetArmLength = 400.f;
@@ -224,6 +227,7 @@ void AHSPlayerCharacter::Landed(const FHitResult& Hit)
 {
 	Super::Landed(Hit);
 	AirDodgesUsed = 0;
+	bIsDoubleJumping = false;
 
 	// Restore gravity and reset air hit count
 	if (Combat)
@@ -242,6 +246,18 @@ void AHSPlayerCharacter::Landed(const FHitResult& Hit)
 		{
 			Movement->bOrientRotationToMovement = true;
 		}
+	}
+}
+
+void AHSPlayerCharacter::OnJumped_Implementation()
+{
+	Super::OnJumped_Implementation();
+
+	// JumpCurrentCount is incremented by ACharacter::CheckJumpInput before this fires.
+	// Second jump (air jump) → flip the flag so the ABP can transition to the double-jump state.
+	if (JumpCurrentCount >= 2)
+	{
+		bIsDoubleJumping = true;
 	}
 }
 

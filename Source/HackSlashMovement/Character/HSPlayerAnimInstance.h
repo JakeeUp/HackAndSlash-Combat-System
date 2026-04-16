@@ -41,6 +41,9 @@ protected:
 	bool bIsInAir = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+	bool bIsDoubleJumping = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
 	bool bIsAccelerating = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")

@@ -39,6 +39,7 @@ void UHSPlayerAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	bIsInAir = OwnerMove->IsFalling();
 	bIsAccelerating = OwnerMove->GetCurrentAcceleration().SizeSquared() > 0.f;
 	bIsSprinting = OwnerChar->IsSprinting();
+	bIsDoubleJumping = OwnerChar->IsDoubleJumping();
 
 	Direction = UKismetAnimationLibrary::CalculateDirection(FlatVel, OwnerChar->GetActorRotation());
 
