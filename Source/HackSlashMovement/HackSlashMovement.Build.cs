@@ -20,7 +20,8 @@ public class HackSlashMovement : ModuleRules
 			"UMG",
 			"Slate",
 			"AnimGraphRuntime",
-			"Niagara"
+			"Niagara",
+			"PhysicsCore"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

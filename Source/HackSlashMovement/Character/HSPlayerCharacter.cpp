@@ -16,10 +16,17 @@
 #include "UI/HSStyleHUD.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Kismet/GameplayStatics.h"
 #include "Character/HSDummyEnemy.h"
 #include "Combat/HSHomingProjectile.h"
 #include "UI/HSLockOnReticle.h"
 #include "Components/WidgetComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
+#include "Sound/SoundBase.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "DrawDebugHelpers.h"
+#include "Components/AudioComponent.h"
 
 AHSPlayerCharacter::AHSPlayerCharacter()
 {
@@ -74,6 +81,12 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 
 	Combat = CreateDefaultSubobject<UHSCombatComponent>(TEXT("Combat"));
 	Style = CreateDefaultSubobject<UHSStyleComponent>(TEXT("Style"));
+
+	BGMAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("BGMAudio"));
+	BGMAudio->SetupAttachment(RootComponent);
+	BGMAudio->bAutoActivate = false;          // we start it manually so we can fade in
+	BGMAudio->bAllowSpatialization = false;   // 2D music, not positional
+	BGMAudio->bIsUISound = false;
 }
 
 void AHSPlayerCharacter::BeginPlay()
@@ -117,6 +130,21 @@ void AHSPlayerCharacter::BeginPlay()
 			{
 				HUD->AddToViewport();
 			}
+		}
+	}
+
+	// Kick off the BGM loop -- either fade in or start at full volume
+	if (BGMAudio && BGMTrack)
+	{
+		BGMAudio->SetSound(BGMTrack);
+		if (BGMFadeInDuration > 0.f)
+		{
+			BGMAudio->FadeIn(BGMFadeInDuration, BGMVolume);
+		}
+		else
+		{
+			BGMAudio->SetVolumeMultiplier(BGMVolume);
+			BGMAudio->Play();
 		}
 	}
 }
@@ -301,8 +329,46 @@ void AHSPlayerCharacter::Move(const FInputActionValue& InputValue)
 		const FVector ForwardDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 		const FVector RightDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-		AddMovementInput(ForwardDir, input.Y);
-		AddMovementInput(RightDir, input.X);
+		// Combine both input axes into a single world-space movement vector so we can
+		// sanitize it (cancel toward-enemy push) before applying.
+		FVector WorldMove = ForwardDir * input.Y + RightDir * input.X;
+
+		// DMC3/FF16 lock-on "pocket": when close to the locked target, kill the
+		// component of input that pushes the player INTO the enemy capsule. Keeps
+		// strafe + back-up working normally, just prevents capsule-on-capsule jitter.
+		if (LockedTarget && !GetCharacterMovement()->IsFalling())
+		{
+			FVector ToEnemy = LockedTarget->GetActorLocation() - GetActorLocation();
+			ToEnemy.Z = 0.f;
+			const float Dist = ToEnemy.Size();
+
+			if (Dist > KINDA_SMALL_NUMBER)
+			{
+				const FVector ToEnemyDir = ToEnemy / Dist;
+				const float ClosingAmount = FVector::DotProduct(WorldMove, ToEnemyDir);
+
+				if (ClosingAmount > 0.f)
+				{
+					// Inside MinDistance: fully cancel the closing component.
+					// In the buffer zone just outside: scale it down linearly.
+					float ClosingScale = 1.f;
+					if (Dist < LockOnMinDistance)
+					{
+						ClosingScale = 0.f;
+					}
+					else if (LockOnApproachBuffer > 0.f && Dist < LockOnMinDistance + LockOnApproachBuffer)
+					{
+						ClosingScale = (Dist - LockOnMinDistance) / LockOnApproachBuffer;
+					}
+
+					// Remove the closing portion, re-add the scaled-down version.
+					WorldMove -= ToEnemyDir * ClosingAmount;
+					WorldMove += ToEnemyDir * ClosingAmount * ClosingScale;
+				}
+			}
+		}
+
+		AddMovementInput(WorldMove);
 	}
 }
 
@@ -806,5 +872,89 @@ void AHSPlayerCharacter::HideLockOnReticle()
 
 		LockOnReticleComp->DestroyComponent();
 		LockOnReticleComp = nullptr;
+	}
+}
+
+void AHSPlayerCharacter::PlayFootstep(FName FootBone)
+{
+	USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!MeshComp) return;
+
+	// Start slightly ABOVE the foot bone so a sprint stride that dips the foot below
+	// a thin surface (water plane) still traces down THROUGH that surface instead of
+	// starting under it and missing.
+	const FVector FootLoc = MeshComp->GetBoneLocation(FootBone);
+	const FVector Start = FootLoc + FVector(0.f, 0.f, FootstepTraceStartHeight);
+	const FVector End = FootLoc - FVector(0.f, 0.f, FootstepTraceDistance);
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(HSFootstep), /*bTraceComplex=*/true, this);
+	Params.bReturnPhysicalMaterial = true;
+
+	FHitResult Hit;
+	const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
+
+	// If we didn't find the ground below the foot, fall back to the foot position itself
+	const FVector ImpactLoc = bHit ? Hit.ImpactPoint : Start;
+
+	// Default to SurfaceType_Default; override if the trace hit a surface with a physical material
+	EPhysicalSurface Surface = SurfaceType_Default;
+	if (bHit && Hit.PhysMaterial.IsValid())
+	{
+		Surface = Hit.PhysMaterial->SurfaceType;
+	}
+
+#if !UE_BUILD_SHIPPING
+	// Temporary diagnostic: visualize the trace and log what surface we read.
+	DrawDebugLine(GetWorld(), Start, End, bHit ? FColor::Green : FColor::Red, false, 2.f, 0, 1.f);
+	const FString HitActorName = bHit && Hit.GetActor() ? Hit.GetActor()->GetName() : TEXT("None");
+	const FString PhysMatName = bHit && Hit.PhysMaterial.IsValid() ? Hit.PhysMaterial->GetName() : TEXT("None");
+	UE_LOG(LogTemp, Warning, TEXT("[Footstep] Bone=%s Hit=%s Actor=%s PhysMat=%s Surface=%d"),
+		*FootBone.ToString(),
+		bHit ? TEXT("true") : TEXT("false"),
+		*HitActorName,
+		*PhysMatName,
+		static_cast<int32>(Surface));
+#endif
+
+	// Pick VFX -- per-surface map first, fall back to default
+	UNiagaraSystem* VFXToPlay = nullptr;
+	if (UNiagaraSystem* const* Found = SurfaceFootstepVFX.Find(Surface))
+	{
+		VFXToPlay = *Found;
+	}
+	if (!VFXToPlay)
+	{
+		VFXToPlay = DefaultFootstepVFX;
+	}
+
+	if (VFXToPlay)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			GetWorld(),
+			VFXToPlay,
+			ImpactLoc,
+			FRotator::ZeroRotator
+		);
+	}
+
+	// Pick SFX -- per-surface pool first, fall back to default pool. Picks one at random.
+	USoundBase* SFXToPlay = nullptr;
+	if (const FHSFootstepSoundSet* Found = SurfaceFootstepSFX.Find(Surface))
+	{
+		if (Found->Sounds.Num() > 0)
+		{
+			const int32 Idx = FMath::RandRange(0, Found->Sounds.Num() - 1);
+			SFXToPlay = Found->Sounds[Idx];
+		}
+	}
+	if (!SFXToPlay && DefaultFootstepSFX.Num() > 0)
+	{
+		const int32 Idx = FMath::RandRange(0, DefaultFootstepSFX.Num() - 1);
+		SFXToPlay = DefaultFootstepSFX[Idx];
+	}
+
+	if (SFXToPlay)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, SFXToPlay, ImpactLoc, FootstepVolumeMultiplier);
 	}
 }

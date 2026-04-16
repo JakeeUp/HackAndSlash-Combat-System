@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "HSPlayerCharacter.generated.h"
 
 
@@ -16,7 +17,20 @@ class UHSStyleHUD;
 class UHSLockOnReticle;
 class UUserWidget;
 class UWidgetComponent;
+class UNiagaraSystem;
+class USoundBase;
 struct FInputActionValue;
+
+
+/** A pool of footstep sounds for a single surface. One is picked at random per step. */
+USTRUCT(BlueprintType)
+struct FHSFootstepSoundSet
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep")
+	TArray<USoundBase*> Sounds;
+};
 
 
 UCLASS()
@@ -51,6 +65,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	class UHSStyleComponent* Style;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	class UAudioComponent* BGMAudio;
 
 	/** Socket on the character's hand bone where the weapon attaches. Defaults to Weapon_R (SwordAnimsetPro skeleton). */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Weapon")
@@ -100,6 +117,11 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Stats")
 	FORCEINLINE int32 GetPlayerLevel() const { return PlayerLevel; }
+
+	/** Called by UHSFootstepNotify on foot-plant frames. Traces down from the foot
+	 *  bone, reads the physical surface, and spawns the matching VFX + SFX. */
+	UFUNCTION(BlueprintCallable, Category = "Footstep")
+	void PlayFootstep(FName FootBone);
 
 protected:
 	/*****************************************************/
@@ -163,6 +185,18 @@ protected:
 	/** Speed at which the arm length adjusts between ground and air distances. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
 	float LockOnArmInterpSpeed = 5.f;
+
+	/** Minimum distance from the locked target that forward movement input will close.
+	 *  DMC3/FF16 "pocket": inside this radius, the toward-enemy component of movement
+	 *  input is canceled so you orbit instead of ramming into the enemy's capsule.
+	 *  Strafing and backing up still work. Tune to ~ playerCapsuleRadius + enemyCapsuleRadius + 50. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn", meta = (ClampMin = "0.0"))
+	float LockOnMinDistance = 150.f;
+
+	/** Width of the soft-zone outside LockOnMinDistance where the toward-enemy
+	 *  component is gradually reduced (not fully canceled). 0 = hard clamp. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn", meta = (ClampMin = "0.0"))
+	float LockOnApproachBuffer = 40.f;
 
 	/** Minimum height the camera must stay above the player's feet during lock-on.
 	 *  DMC3 pattern: camera never goes below this height to prevent terrain clipping. */
@@ -249,6 +283,58 @@ protected:
 	/** Blend-out time when dodge is canceled by movement input. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Dodge")
 	float DodgeCancelBlendOut = 0.15f;
+
+	/*****************************************************/
+	/*                      Footstep                     */
+	/*****************************************************/
+
+	/** Per-surface footstep VFX. Key = physical surface type (SurfaceType1..SurfaceTypeN),
+	 *  value = Niagara system to spawn at the foot impact point. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Footstep")
+	TMap<TEnumAsByte<EPhysicalSurface>, UNiagaraSystem*> SurfaceFootstepVFX;
+
+	/** Per-surface footstep SFX. Key = physical surface type, value = pool of sounds
+	 *  (a random one is picked per step, so walking doesn't sound looped). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Footstep")
+	TMap<TEnumAsByte<EPhysicalSurface>, FHSFootstepSoundSet> SurfaceFootstepSFX;
+
+	/** Fallback VFX used when the traced surface isn't in SurfaceFootstepVFX. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Footstep")
+	UNiagaraSystem* DefaultFootstepVFX = nullptr;
+
+	/** Fallback SFX pool used when the traced surface isn't in SurfaceFootstepSFX. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Footstep")
+	TArray<USoundBase*> DefaultFootstepSFX;
+
+	/** How far below the foot bone to trace when looking for the surface under the foot. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Footstep", meta = (ClampMin = "1.0"))
+	float FootstepTraceDistance = 60.f;
+
+	/** How far ABOVE the foot bone to start the trace. Needs to be tall enough that the
+	 *  trace start is above any thin surface the foot might clip into (like a water plane
+	 *  the foot dips below during a sprint stride). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Footstep", meta = (ClampMin = "0.0"))
+	float FootstepTraceStartHeight = 40.f;
+
+	/** Volume multiplier for footstep SFX. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Footstep", meta = (ClampMin = "0.0"))
+	float FootstepVolumeMultiplier = 1.f;
+
+	/*****************************************************/
+	/*                        BGM                        */
+	/*****************************************************/
+
+	/** Looping background music track. Assign a Sound Cue / Wave with Looping = true. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|BGM")
+	USoundBase* BGMTrack = nullptr;
+
+	/** Volume multiplier for the BGM track. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|BGM", meta = (ClampMin = "0.0"))
+	float BGMVolume = 0.6f;
+
+	/** Seconds to fade the BGM in when the level starts. 0 = start at full volume. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|BGM", meta = (ClampMin = "0.0"))
+	float BGMFadeInDuration = 2.f;
 
 	/*****************************************************/
 	/*                    Player Stats                   */
