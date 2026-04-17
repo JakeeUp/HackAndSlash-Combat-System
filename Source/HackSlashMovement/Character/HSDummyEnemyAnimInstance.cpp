@@ -27,6 +27,7 @@ void UHSDummyEnemyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	EnemyState = OwnerEnemy->GetEnemyState();
 	bIsDead = OwnerEnemy->IsDead();
 	bInDropLoop = OwnerEnemy->IsInDropLoop();
+	bJustLaunched = OwnerEnemy->IsJustLaunched();
 
 	if (UCharacterMovementComponent* Movement = OwnerEnemy->GetCharacterMovement())
 	{

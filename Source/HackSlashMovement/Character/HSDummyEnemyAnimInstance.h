@@ -37,6 +37,12 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|State")
 	bool bInDropLoop = false;
 
+	/** Pulsed true the moment a launcher hit lands -- use as an immediate transition
+	 *  trigger in the ABP to jump to the air hit-react state with no delay.
+	 *  Cleared once StartDropLoop fires (enemy is now in the falling loop). */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|State")
+	bool bJustLaunched = false;
+
 	/** True when the enemy is dead. */
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|State")
 	bool bIsDead = false;

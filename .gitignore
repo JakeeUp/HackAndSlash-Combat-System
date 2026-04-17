@@ -14,6 +14,9 @@ Saved/
 *.user
 *.log
 
+# Music tracks -- large files, kept local only
+Content/_MyFiles/SFX/Music/
+
 # Paid marketplace assets - do not redistribute
 Content/SwordAnimsetPro/
 Content/HomingMissile/

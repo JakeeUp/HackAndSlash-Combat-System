@@ -19,6 +19,7 @@ class UUserWidget;
 class UWidgetComponent;
 class UNiagaraSystem;
 class USoundBase;
+class UAudioComponent;
 struct FInputActionValue;
 
 
@@ -67,7 +68,10 @@ public:
 	class UHSStyleComponent* Style;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	class UAudioComponent* BGMAudio;
+	UAudioComponent* BGMAudio;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UAudioComponent* CombatBGMAudio;
 
 	/** Socket on the character's hand bone where the weapon attaches. Defaults to Weapon_R (SwordAnimsetPro skeleton). */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Weapon")
@@ -122,6 +126,10 @@ public:
 	 *  bone, reads the physical surface, and spawns the matching VFX + SFX. */
 	UFUNCTION(BlueprintCallable, Category = "Footstep")
 	void PlayFootstep(FName FootBone);
+
+	/** Called by HSCombatComponent when an attack swing starts. bIsHeavy selects
+	 *  the heavy grunt pool; false uses the light pool (covers air + rising too). */
+	void PlayAttackGrunt(bool bIsHeavy);
 
 protected:
 	/*****************************************************/
@@ -220,6 +228,10 @@ protected:
 	/** Animation for the right arm when firing a projectile. Plays on UpperBody slot. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Projectile")
 	UAnimMontage* ProjectileCastMontage;
+
+	/** Sound played when Q fires -- the cast/launch sound on the player side. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Projectile")
+	USoundBase* ProjectileCastSound = nullptr;
 
 	/** Camera shake when firing a projectile (press Q). */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Projectile")
@@ -324,17 +336,55 @@ protected:
 	/*                        BGM                        */
 	/*****************************************************/
 
-	/** Looping background music track. Assign a Sound Cue / Wave with Looping = true. */
+	/** Looping exploration music. Plays during normal traversal. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|BGM")
 	USoundBase* BGMTrack = nullptr;
 
-	/** Volume multiplier for the BGM track. */
+	/** Looping combat music. Crossfades in when enemies are nearby. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|BGM")
+	USoundBase* CombatBGMTrack = nullptr;
+
+	/** Volume for the exploration BGM track. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|BGM", meta = (ClampMin = "0.0"))
 	float BGMVolume = 0.6f;
 
-	/** Seconds to fade the BGM in when the level starts. 0 = start at full volume. */
+	/** Volume for the combat BGM track. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|BGM", meta = (ClampMin = "0.0"))
+	float CombatBGMVolume = 0.6f;
+
+	/** Seconds to fade the exploration BGM in at level start. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|BGM", meta = (ClampMin = "0.0"))
 	float BGMFadeInDuration = 2.f;
+
+	/** How long the crossfade between exploration and combat tracks takes. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|BGM", meta = (ClampMin = "0.0"))
+	float BGMCrossfadeDuration = 1.5f;
+
+	/** Radius around the player to check for living enemies. Combat music
+	 *  kicks in when at least one enemy is within this range. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|BGM", meta = (ClampMin = "0.0"))
+	float CombatMusicRange = 1500.f;
+
+	/** How long (seconds) to stay in combat music after the last nearby enemy
+	 *  dies or leaves range -- prevents rapid ping-ponging on the edge. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|BGM", meta = (ClampMin = "0.0"))
+	float CombatMusicLingerTime = 4.f;
+
+	/*****************************************************/
+	/*                   Attack Grunts                   */
+	/*****************************************************/
+
+	/** Voice grunts for light/air/rising attacks. One is picked at random per swing. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Grunts")
+	TArray<USoundBase*> LightAttackGrunts;
+
+	/** Voice grunts for heavy attacks. One is picked at random per swing. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Grunts")
+	TArray<USoundBase*> HeavyAttackGrunts;
+
+	/** Volume multiplier for grunt sounds. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Grunts", meta = (ClampMin = "0.0"))
+	float GruntVolumeMultiplier = 1.f;
 
 	/*****************************************************/
 	/*                    Player Stats                   */
@@ -477,6 +527,19 @@ private:
 	/*****************************************************/
 	/** Returns true when the stick is tilted away from the locked target (back-tilt for rising attack). */
 	bool IsBackTiltInput() const;
+
+	/** Proximity check fired on a repeating timer -- switches music when enemies enter/leave range. */
+	void UpdateCombatMusicState();
+	void EnterCombatMusic();
+	void ExitCombatMusic();
+
+	bool bIsInCombatMusic = false;
+
+	/** Repeating timer for the proximity check (every 0.75s). */
+	FTimerHandle CombatMusicCheckHandle;
+
+	/** Delays the switch back to exploration music after enemies leave range. */
+	FTimerHandle CombatLingerHandle;
 
 	FVector ResolveCameraRelativeInputDirection() const;
 	UAnimMontage* GetDodgeMontage(int32 Index) const;

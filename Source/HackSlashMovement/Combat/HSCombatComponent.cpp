@@ -449,12 +449,6 @@ void UHSCombatComponent::DoSwordTrace()
 		PlayHitSound();
 	}
 
-	// Screen flash + time dilation on rising/launcher hits only
-	if (bLandedHit && CurrentAttackType == EAttackType::EAT_Rising)
-	{
-		ApplyScreenHitEffect();
-	}
-
 	// Camera shake on hit (FF16 style impact feel)
 	if (bLandedHit && HitCameraShake)
 	{
@@ -487,6 +481,10 @@ void UHSCombatComponent::PlaySwingSound()
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, Sound, OwnerChar->GetActorLocation());
 	}
+
+	// Voice grunt -- heavy attacks use the heavy pool, everything else uses light
+	const bool bIsHeavy = (CurrentAttackType == EAttackType::EAT_Heavy);
+	OwnerChar->PlayAttackGrunt(bIsHeavy);
 }
 
 void UHSCombatComponent::PlayHitSound()

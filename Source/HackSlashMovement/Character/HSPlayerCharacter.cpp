@@ -84,9 +84,15 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 
 	BGMAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("BGMAudio"));
 	BGMAudio->SetupAttachment(RootComponent);
-	BGMAudio->bAutoActivate = false;          // we start it manually so we can fade in
-	BGMAudio->bAllowSpatialization = false;   // 2D music, not positional
+	BGMAudio->bAutoActivate = false;
+	BGMAudio->bAllowSpatialization = false;
 	BGMAudio->bIsUISound = false;
+
+	CombatBGMAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("CombatBGMAudio"));
+	CombatBGMAudio->SetupAttachment(RootComponent);
+	CombatBGMAudio->bAutoActivate = false;
+	CombatBGMAudio->bAllowSpatialization = false;
+	CombatBGMAudio->bIsUISound = false;
 }
 
 void AHSPlayerCharacter::BeginPlay()
@@ -147,6 +153,21 @@ void AHSPlayerCharacter::BeginPlay()
 			BGMAudio->Play();
 		}
 	}
+
+	// Register the combat track so it's ready -- don't play yet, FadeIn will start it
+	if (CombatBGMAudio && CombatBGMTrack)
+	{
+		CombatBGMAudio->SetSound(CombatBGMTrack);
+	}
+
+	// Proximity check every 0.75s -- cheap enough to not care about, avoids per-frame overlap queries
+	GetWorldTimerManager().SetTimer(
+		CombatMusicCheckHandle,
+		this,
+		&AHSPlayerCharacter::UpdateCombatMusicState,
+		0.75f,
+		true   // looping
+	);
 }
 
 void AHSPlayerCharacter::Tick(float DeltaTime)
@@ -578,6 +599,12 @@ void AHSPlayerCharacter::FireProjectile()
 		}
 	}
 
+	// Cast sound
+	if (ProjectileCastSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, ProjectileCastSound, GetActorLocation());
+	}
+
 	// Camera shake on fire
 	if (FireCameraShake)
 	{
@@ -956,5 +983,116 @@ void AHSPlayerCharacter::PlayFootstep(FName FootBone)
 	if (SFXToPlay)
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, SFXToPlay, ImpactLoc, FootstepVolumeMultiplier);
+	}
+}
+
+void AHSPlayerCharacter::UpdateCombatMusicState()
+{
+	if (!CombatBGMTrack)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[CombatMusic] CombatBGMTrack is not assigned on BP_HSPlayer -- assign it in Configurations|BGM"));
+		return;
+	}
+
+	// Sphere overlap for living enemy pawns within CombatMusicRange
+	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
+	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn));
+
+	TArray<AActor*> IgnoreActors;
+	IgnoreActors.Add(this);
+
+	TArray<AActor*> FoundActors;
+	UKismetSystemLibrary::SphereOverlapActors(
+		GetWorld(),
+		GetActorLocation(),
+		CombatMusicRange,
+		ObjectTypes,
+		AHSDummyEnemy::StaticClass(),
+		IgnoreActors,
+		FoundActors
+	);
+
+	// Filter -- only count living enemies
+	const bool bEnemyNearby = FoundActors.ContainsByPredicate([](const AActor* A)
+	{
+		const AHSDummyEnemy* Enemy = Cast<AHSDummyEnemy>(A);
+		return Enemy && !Enemy->IsDead();
+	});
+
+	UE_LOG(LogTemp, Log, TEXT("[CombatMusic] Tick — EnemiesFound=%d  bEnemyNearby=%d  bInCombatMusic=%d"),
+		FoundActors.Num(), bEnemyNearby ? 1 : 0, bIsInCombatMusic ? 1 : 0);
+
+	if (bEnemyNearby)
+	{
+		// Cancel any pending linger-out and switch to combat music immediately
+		GetWorldTimerManager().ClearTimer(CombatLingerHandle);
+		if (!bIsInCombatMusic)
+		{
+			EnterCombatMusic();
+		}
+	}
+	else if (bIsInCombatMusic)
+	{
+		// No enemies nearby -- start the linger countdown if not already running
+		if (!GetWorldTimerManager().IsTimerActive(CombatLingerHandle))
+		{
+			GetWorldTimerManager().SetTimer(
+				CombatLingerHandle,
+				this,
+				&AHSPlayerCharacter::ExitCombatMusic,
+				CombatMusicLingerTime,
+				false
+			);
+		}
+	}
+}
+
+void AHSPlayerCharacter::EnterCombatMusic()
+{
+	if (bIsInCombatMusic) return;
+	bIsInCombatMusic = true;
+
+	// Fade exploration track out
+	if (BGMAudio && BGMAudio->IsPlaying())
+	{
+		BGMAudio->FadeOut(BGMCrossfadeDuration, 0.f);
+	}
+
+	// Start combat track from clean state and fade it in
+	if (CombatBGMAudio)
+	{
+		CombatBGMAudio->SetVolumeMultiplier(1.f);
+		CombatBGMAudio->FadeIn(BGMCrossfadeDuration, CombatBGMVolume);
+	}
+}
+
+void AHSPlayerCharacter::ExitCombatMusic()
+{
+	if (!bIsInCombatMusic) return;
+	bIsInCombatMusic = false;
+
+	// Fade combat track out
+	if (CombatBGMAudio && CombatBGMAudio->IsPlaying())
+	{
+		CombatBGMAudio->FadeOut(BGMCrossfadeDuration, 0.f);
+	}
+
+	// Restart exploration track from clean state and fade it back in
+	if (BGMAudio && BGMTrack)
+	{
+		BGMAudio->SetVolumeMultiplier(1.f);
+		BGMAudio->FadeIn(BGMCrossfadeDuration, BGMVolume);
+	}
+}
+
+void AHSPlayerCharacter::PlayAttackGrunt(bool bIsHeavy)
+{
+	const TArray<USoundBase*>& Pool = bIsHeavy ? HeavyAttackGrunts : LightAttackGrunts;
+	if (Pool.IsEmpty()) return;
+
+	const int32 Idx = FMath::RandRange(0, Pool.Num() - 1);
+	if (USoundBase* Sound = Pool[Idx])
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, Sound, GetActorLocation(), GruntVolumeMultiplier);
 	}
 }

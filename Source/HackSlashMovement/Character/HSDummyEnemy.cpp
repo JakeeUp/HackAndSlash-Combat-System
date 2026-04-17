@@ -44,7 +44,7 @@ void AHSDummyEnemy::Landed(const FHitResult& Hit)
 
 		if (LandImpactSound)
 		{
-			UGameplayStatics::PlaySoundAtLocation(this, LandImpactSound, GetActorLocation());
+			UGameplayStatics::PlaySoundAtLocation(this, LandImpactSound, GetActorLocation(), SFXVolumeMultiplier);
 		}
 
 		// Transition to Down -- the ABP state machine handles drop end → getup animations.
@@ -109,6 +109,10 @@ void AHSDummyEnemy::HandleHitReaction(float DamageAmount, AActor* DamageCauser, 
 		{
 			HitSFX = LaunchSound;
 		}
+		else if (bIsProjectile)
+		{
+			HitSFX = ProjectileHitSound;
+		}
 		else if (bIsHeavy)
 		{
 			HitSFX = HeavyHitSound;
@@ -120,7 +124,7 @@ void AHSDummyEnemy::HandleHitReaction(float DamageAmount, AActor* DamageCauser, 
 
 		if (HitSFX)
 		{
-			UGameplayStatics::PlaySoundAtLocation(this, HitSFX, GetActorLocation());
+			UGameplayStatics::PlaySoundAtLocation(this, HitSFX, GetActorLocation(), SFXVolumeMultiplier);
 		}
 	}
 
@@ -141,9 +145,10 @@ void AHSDummyEnemy::HandleHitReaction(float DamageAmount, AActor* DamageCauser, 
 
 	if (bIsLauncher)
 	{
-		// No montage -- let the ABP HitStart state handle the launch animation.
-		// Just clear the drop loop flag so the state machine starts fresh.
+		// Pulse the launched flag -- ABP reads this to immediately jump to the
+		// air hit-react state. No montage needed; the state machine handles it.
 		bInDropLoop = false;
+		bJustLaunched = true;
 	}
 	else if (EnemyState == EEnemyState::EES_Airborne && AirHitReactMontages.Num() > 0)
 	{
@@ -325,6 +330,7 @@ void AHSDummyEnemy::StartDropLoop()
 {
 	if (bIsDead) return;
 	bInDropLoop = true;
+	bJustLaunched = false;  // ABP has had its transition window; clear the pulse
 }
 
 void AHSDummyEnemy::Die()

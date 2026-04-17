@@ -120,6 +120,9 @@ void AHSHomingProjectile::ApplyDamageToActor(AActor* Target)
 
 	if (Target->Implements<UHSDamageable>())
 	{
-		IHSDamageable::Execute_ApplyDamage(Target, CachedDamage, CachedInstigator);
+		// Pass 'this' (the projectile) as DamageCauser, not the instigator pawn.
+		// The enemy checks !DamageCauser->IsA(ACharacter) to detect projectile hits --
+		// the player pawn would fail that check since it IS a character.
+		IHSDamageable::Execute_ApplyDamage(Target, CachedDamage, this);
 	}
 }

@@ -51,6 +51,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "State")
 	FORCEINLINE bool IsInDropLoop() const { return bInDropLoop; }
 
+	/** True for the single frame/tick immediately after a launcher hit lands.
+	 *  The ABP reads this to instantly transition to the air hit-react state
+	 *  without waiting for EnemyState to propagate. Cleared once StartDropLoop fires. */
+	UFUNCTION(BlueprintPure, Category = "State")
+	FORCEINLINE bool IsJustLaunched() const { return bJustLaunched; }
+
 protected:
 	/*****************************************************/
 	/*                    Configurations                 */
@@ -174,6 +180,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
 	USoundBase* HeavyHitSound;
 
+	/** Sound played when the enemy is hit by a projectile (Q ability). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
+	USoundBase* ProjectileHitSound;
+
 	/** Sound played when the enemy gets launched into the air. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
 	USoundBase* LaunchSound;
@@ -181,6 +191,10 @@ protected:
 	/** Sound when the enemy hits the ground after being airborne. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
 	USoundBase* LandImpactSound;
+
+	/** Volume multiplier applied to all enemy SFX (hit, launch, land). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX", meta = (ClampMin = "0.0"))
+	float SFXVolumeMultiplier = 1.f;
 
 	/*****************************************************/
 	/*                        State                      */
@@ -196,6 +210,10 @@ protected:
 
 	/** True while the hit drop loop montage is playing (enemy falling after air combo). */
 	bool bInDropLoop = false;
+
+	/** Pulsed true when a launcher hit lands -- clears once StartDropLoop fires.
+	 *  One-shot signal for the ABP to jump to the air hit-react state immediately. */
+	bool bJustLaunched = false;
 
 private:
 	void Die();
