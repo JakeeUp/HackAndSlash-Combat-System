@@ -27,3 +27,7 @@ Content/InfinityBladeEffects/
 Content/A_Surface_Footstep/
 Content/TwoHandedSwordAnimationV3/
 Content/_MyFiles/UI/Fonts/DMC5Font*
+
+# Purchased two-handed sword animations (copied into enemy folder) -- do not redistribute
+Content/_MyFiles/Enemy/TwoHanded_IP/
+Content/_MyFiles/Enemy/TwoHanded_RM/

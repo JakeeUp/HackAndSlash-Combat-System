@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
 #include "HSDummyEnemy.h"
+#include "HSEnemyCombatAI.h"
 #include "HSDummyEnemyAnimInstance.generated.h"
 
 
@@ -47,7 +48,17 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|State")
 	bool bIsDead = false;
 
-	/** Horizontal speed for locomotion blending (if needed later). */
+	/** Horizontal speed for locomotion blending. */
 	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
 	float Speed = 0.f;
+
+	/** Angle (degrees) between the actor's forward vector and its velocity.
+	 *  0 = moving forward, 90 = strafing right, -90 = strafing left, 180 = backing up.
+	 *  Used as the X axis on the 2D locomotion blend space. */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|Locomotion")
+	float Direction = 0.f;
+
+	/** Current AI state -- used to drive the windup telegraph pose. */
+	UPROPERTY(BlueprintReadOnly, Category = "Anim|State")
+	EAIState AIState = EAIState::Idle;
 };

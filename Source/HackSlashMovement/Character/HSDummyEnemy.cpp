@@ -1,5 +1,7 @@
 #include "HSDummyEnemy.h"
 
+#include "Character/HSEnemyCombatAI.h"
+#include "Character/HSEnemyAIController.h"
 #include "UI/HSDamageNumber.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -23,6 +25,13 @@ AHSDummyEnemy::AHSDummyEnemy()
 
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->MaxWalkSpeed = 0.f;
+
+	// AI component -- provides the DMC-style combat state machine
+	CombatAI = CreateDefaultSubobject<UHSEnemyCombatAI>(TEXT("CombatAI"));
+
+	// Use our minimal AIController so the combat AI gets NavMesh pathfinding
+	AIControllerClass = AHSEnemyAIController::StaticClass();
+	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 }
 
 void AHSDummyEnemy::BeginPlay()
@@ -204,9 +213,20 @@ void AHSDummyEnemy::HandleHitReaction(float DamageAmount, AActor* DamageCauser, 
 		}
 	}
 
+	// Let the AI know a hit landed so it can interrupt attacks / stagger
+	NotifyAIHit(HitWeight);
+
 	if (CurrentHealth <= 0.f)
 	{
 		Die();
+	}
+}
+
+void AHSDummyEnemy::NotifyAIHit(EHitWeight HitWeight)
+{
+	if (CombatAI)
+	{
+		CombatAI->NotifyHit(HitWeight);
 	}
 }
 

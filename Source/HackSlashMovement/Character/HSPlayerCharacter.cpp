@@ -6,6 +6,7 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -245,6 +246,12 @@ void AHSPlayerCharacter::Tick(float DeltaTime)
 	{
 		CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, DesiredCameraOffset, DeltaTime, LockOnArmInterpSpeed);
 		CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, DesiredArmLength, DeltaTime, LockOnArmInterpSpeed);
+	}
+
+	// DMC-style FOV compression: zoom in slightly per hit, ease back passively
+	if (Combat)
+	{
+		Combat->UpdateFOVCompression(DeltaTime);
 	}
 }
 
@@ -1094,5 +1101,37 @@ void AHSPlayerCharacter::PlayAttackGrunt(bool bIsHeavy)
 	if (USoundBase* Sound = Pool[Idx])
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, Sound, GetActorLocation(), GruntVolumeMultiplier);
+	}
+}
+
+void AHSPlayerCharacter::ReceiveEnemyAttack(float Damage)
+{
+	if (bIsInvincible || Damage <= 0.f) return;
+
+	CurrentHealth = FMath::Max(0.f, CurrentHealth - Damage);
+
+	// Brief invincibility window so a single enemy attack can't multi-hit
+	bIsInvincible = true;
+	GetWorldTimerManager().ClearTimer(InvincibilityTimerHandle);
+	GetWorldTimerManager().SetTimer(
+		InvincibilityTimerHandle,
+		FTimerDelegate::CreateLambda([this]() { bIsInvincible = false; }),
+		HitInvincibilityDuration,
+		false
+	);
+
+	// Red screen flash so the player knows they got hit
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		if (APlayerCameraManager* CamMgr = PC->PlayerCameraManager)
+		{
+			CamMgr->StartCameraFade(0.25f, 0.f, 0.2f, FLinearColor(1.f, 0.f, 0.f), false, true);
+		}
+
+		// Camera shake
+		if (HitReceiveCameraShake)
+		{
+			PC->ClientStartCameraShake(HitReceiveCameraShake, HitReceiveShakeScale);
+		}
 	}
 }

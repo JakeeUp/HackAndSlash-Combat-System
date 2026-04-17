@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Combat/HSDamageable.h"
+#include "Character/HSEnemyCombatAI.h"
 #include "HSDummyEnemy.generated.h"
 
 
@@ -34,6 +35,11 @@ protected:
 
 public:
 	virtual void Landed(const FHitResult& Hit) override;
+
+	/** DMC/FF16-style combat AI. Add this component in the Blueprint to enable
+	 *  token-based attack queueing, orbit/strafe, and crowd separation. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UHSEnemyCombatAI* CombatAI;
 
 	UFUNCTION(BlueprintPure, Category = "State")
 	FORCEINLINE EEnemyState GetEnemyState() const { return EnemyState; }
@@ -222,6 +228,9 @@ private:
 	void ApplyKnockback(const FVector& HitDirection, EHitWeight HitWeight, bool bIsProjectile);
 	void ApplyHitstop(EHitWeight HitWeight);
 	void EndHitstop();
+
+	/** Notify the AI component that a hit landed so it can interrupt or stagger. */
+	void NotifyAIHit(EHitWeight HitWeight);
 
 	/** Start the looping fall animation after an air hit react finishes. */
 	void StartDropLoop();

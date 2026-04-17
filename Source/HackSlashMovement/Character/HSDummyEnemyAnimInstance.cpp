@@ -35,5 +35,25 @@ void UHSDummyEnemyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	}
 
 	const FVector Vel = OwnerEnemy->GetVelocity();
-	Speed = FVector(Vel.X, Vel.Y, 0.f).Size();
+	const FVector FlatVel(Vel.X, Vel.Y, 0.f);
+	Speed = FlatVel.Size();
+
+	// Direction: angle between actor forward and velocity direction.
+	// Atan2(right component, forward component) gives -180..180.
+	if (Speed > 1.f)
+	{
+		Direction = FMath::RadiansToDegrees(FMath::Atan2(
+			FVector::DotProduct(FlatVel, OwnerEnemy->GetActorRightVector()),
+			FVector::DotProduct(FlatVel, OwnerEnemy->GetActorForwardVector())
+		));
+	}
+	else
+	{
+		Direction = 0.f; // no velocity -- don't let direction snap around
+	}
+
+	if (OwnerEnemy->CombatAI)
+	{
+		AIState = OwnerEnemy->CombatAI->GetAIState();
+	}
 }

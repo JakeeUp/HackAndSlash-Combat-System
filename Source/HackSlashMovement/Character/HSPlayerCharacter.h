@@ -131,6 +131,10 @@ public:
 	 *  the heavy grunt pool; false uses the light pool (covers air + rising too). */
 	void PlayAttackGrunt(bool bIsHeavy);
 
+	/** Called by UHSEnemyCombatAI when an enemy attack connects.
+	 *  Applies damage, brief screen flash, and a short invincibility window. */
+	void ReceiveEnemyAttack(float Damage);
+
 protected:
 	/*****************************************************/
 	/*                    Configurations                 */
@@ -281,6 +285,18 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Dodge")
 	int32 MaxAirDodges = 1;
+
+	/** Camera shake played when the player receives a hit from an enemy. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Combat")
+	TSubclassOf<UCameraShakeBase> HitReceiveCameraShake;
+
+	/** Scale for the receive-hit camera shake. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Combat")
+	float HitReceiveShakeScale = 0.8f;
+
+	/** How long the player is invincible after receiving a hit (prevents multi-hit from the same attack). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Combat", meta = (ClampMin = "0.0"))
+	float HitInvincibilityDuration = 0.5f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Dodge")
 	float AirDodgeLaunchSpeed = 1100.f;
@@ -540,6 +556,10 @@ private:
 
 	/** Delays the switch back to exploration music after enemies leave range. */
 	FTimerHandle CombatLingerHandle;
+
+	/** Set during the invincibility window after the player is hit. */
+	bool bIsInvincible = false;
+	FTimerHandle InvincibilityTimerHandle;
 
 	FVector ResolveCameraRelativeInputDirection() const;
 	UAnimMontage* GetDodgeMontage(int32 Index) const;

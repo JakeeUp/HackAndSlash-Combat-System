@@ -55,6 +55,10 @@ public:
 	/** Called when the character lands -- restores gravity and resets air hit tracking. */
 	void OnOwnerLanded();
 
+	/** Called every frame from AHSPlayerCharacter::Tick.
+	 *  Eases the accumulated FOV compression back to 0 and applies it to the follow camera. */
+	void UpdateFOVCompression(float DeltaTime);
+
 	/*****************************************************/
 	/*               Anim Notify Callbacks               */
 	/*****************************************************/
@@ -137,6 +141,18 @@ protected:
 	/** Scale for air attack camera shake. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake")
 	float AirHitShakeScale = 0.6f;
+
+	/** DMC-style subtle FOV compression per landed hit (degrees of zoom-in). Accumulates up to MaxFOVCompression. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake", meta = (ClampMin = "0.0"))
+	float FOVCompressionPerHit = 2.f;
+
+	/** Maximum total FOV compression that can accumulate across a combo (degrees). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake", meta = (ClampMin = "0.0"))
+	float MaxFOVCompression = 8.f;
+
+	/** Speed at which FOV eases back to its default value when not actively hitting (FInterpTo speed). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake", meta = (ClampMin = "0.1"))
+	float FOVRecoverySpeed = 3.f;
 
 	/*****************************************************/
 	/*                    Sound Effects                  */
@@ -268,4 +284,10 @@ private:
 	void RestoreTimeDilation();
 
 	FTimerHandle TimeDilationHandle;
+
+	/** Accumulated FOV compression in degrees.  Zeroes out via FInterpTo when not hitting. */
+	float CurrentFOVCompression = 0.f;
+
+	/** Default FOV of the follow camera -- captured once in BeginPlay so we can restore it. */
+	float DefaultCameraFOV = 90.f;
 };

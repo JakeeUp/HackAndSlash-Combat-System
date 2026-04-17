@@ -6,6 +6,7 @@
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
@@ -26,6 +27,12 @@ void UHSCombatComponent::BeginPlay()
 	Super::BeginPlay();
 
 	OwnerChar = Cast<AHSPlayerCharacter>(GetOwner());
+
+	// Cache the camera's default FOV so UpdateFOVCompression can restore it correctly
+	if (OwnerChar && OwnerChar->FollowCamera)
+	{
+		DefaultCameraFOV = OwnerChar->FollowCamera->FieldOfView;
+	}
 }
 
 void UHSCombatComponent::TryLightAttack()
@@ -461,6 +468,23 @@ void UHSCombatComponent::DoSwordTrace()
 			PC->ClientStartCameraShake(HitCameraShake, ShakeScale);
 		}
 	}
+
+	// FOV compression per hit -- accumulates up to MaxFOVCompression, eases back in Tick
+	if (bLandedHit)
+	{
+		CurrentFOVCompression = FMath::Min(CurrentFOVCompression + FOVCompressionPerHit, MaxFOVCompression);
+	}
+}
+
+void UHSCombatComponent::UpdateFOVCompression(float DeltaTime)
+{
+	if (!OwnerChar || !OwnerChar->FollowCamera) return;
+
+	// Ease back toward 0 every frame (whether or not we hit)
+	CurrentFOVCompression = FMath::FInterpTo(CurrentFOVCompression, 0.f, DeltaTime, FOVRecoverySpeed);
+
+	// Apply compression as a zoom-in (subtract from default)
+	OwnerChar->FollowCamera->FieldOfView = DefaultCameraFOV - CurrentFOVCompression;
 }
 
 void UHSCombatComponent::PlaySwingSound()
