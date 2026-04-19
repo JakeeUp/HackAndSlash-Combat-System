@@ -127,6 +127,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Footstep")
 	void PlayFootstep(FName FootBone);
 
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	FORCEINLINE float GetCurrentXP() const { return CurrentXP; }
+
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	FORCEINLINE float GetXPToNextLevel() const { return XPToNextLevel; }
+
+	UFUNCTION(BlueprintPure, Category = "Stats")
+	float GetXPPercent() const { return (XPToNextLevel > 0.f) ? (CurrentXP / XPToNextLevel) : 0.f; }
+
+	/** Add XP and handle level-up(s).  Called by AHSXPOrb on collection. */
+	void AddXP(float Amount);
+
 	/** Called by HSCombatComponent when an attack swing starts. bIsHeavy selects
 	 *  the heavy grunt pool; false uses the light pool (covers air + rising too). */
 	void PlayAttackGrunt(bool bIsHeavy);
@@ -415,11 +427,25 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Stats", meta = (ClampMin = "1"))
 	int32 PlayerLevel = 1;
 
+	/** XP required to level up at level 1.  Each subsequent level scales by XPScalePerLevel. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Stats", meta = (ClampMin = "1.0"))
+	float BaseXPToLevel = 100.f;
+
+	/** Multiplier applied to XPToNextLevel on each level-up. 1.5 = 50% more XP per level. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Stats", meta = (ClampMin = "1.0"))
+	float XPScalePerLevel = 1.5f;
+
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Stats")
 	float CurrentHealth = 0.f;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Stats")
 	float CurrentMP = 0.f;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Stats")
+	float CurrentXP = 0.f;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Stats")
+	float XPToNextLevel = 0.f;
 
 	/*****************************************************/
 	/*                        State                      */

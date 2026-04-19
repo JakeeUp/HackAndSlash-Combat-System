@@ -9,8 +9,10 @@
 
 class UAnimMontage;
 class AHSDamageNumber;
+class AHSXPOrb;
 class UNiagaraSystem;
 class USoundBase;
+class UMaterialInterface;
 
 
 UENUM(BlueprintType)
@@ -140,6 +142,16 @@ protected:
 	/*                    Hit VFX                        */
 	/*****************************************************/
 
+	/** Material applied as an overlay over the full mesh for a brief flash when hit.
+	 *  Create a simple Additive/Translucent red emissive material and assign here.
+	 *  Blend Mode: Additive  |  Shading Model: Unlit  |  Emissive: (2,0,0)  |  Opacity: 0.6 */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|VFX")
+	UMaterialInterface* DamageFlashMaterial;
+
+	/** How long the red flash stays visible after a hit (seconds). */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|VFX", meta = (ClampMin = "0.0"))
+	float DamageFlashDuration = 0.08f;
+
 	/** Particle system to spawn at the hit location for sword impacts. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|VFX")
 	UNiagaraSystem* SwordHitVFX;
@@ -162,6 +174,22 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Hitstop")
 	float HeavyHitstopDuration = 0.1f;
+
+	/*****************************************************/
+	/*                   XP Rewards                      */
+	/*****************************************************/
+
+	/** XP orb actor class -- assign BP_XPOrb in the Blueprint defaults. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Rewards")
+	TSubclassOf<AHSXPOrb> XPOrbClass;
+
+	/** Total XP granted when this enemy dies.  Split evenly across XPOrbCount orbs. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Rewards", meta = (ClampMin = "0.0"))
+	float XPReward = 25.f;
+
+	/** How many separate orbs to burst out.  More orbs = more satisfying scatter feel. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Rewards", meta = (ClampMin = "1"))
+	int32 XPOrbCount = 5;
 
 	/*****************************************************/
 	/*                  Damage Numbers                   */
@@ -241,6 +269,16 @@ private:
 	/** Timer callback -- sets state back to Idle after landing. */
 	void PlayGetup();
 
+	/** Apply the red damage flash overlay.  Resets the clear timer so rapid hits extend it correctly. */
+	void FlashDamageOverlay();
+
+	/** Remove the damage flash overlay after the flash duration. */
+	void ClearDamageFlash();
+
+	/** Spawn XP orbs scattered around the death location. */
+	void SpawnXPOrbs();
+
 	FTimerHandle HitstopTimerHandle;
 	FTimerHandle GetupTimerHandle;
+	FTimerHandle DamageFlashTimerHandle;
 };

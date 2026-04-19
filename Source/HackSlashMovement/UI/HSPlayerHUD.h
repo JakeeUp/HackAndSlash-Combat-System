@@ -8,6 +8,7 @@
 
 
 class AHSPlayerCharacter;
+class UHSXPRingWidget;
 
 
 UCLASS()
@@ -43,6 +44,11 @@ protected:
 	/** Character portrait image. Bind to an Image widget. */
 	UPROPERTY(meta = (BindWidget))
 	class UImage* CharacterPortrait;
+
+	/** XP ring surrounding the portrait.  Bind to a UHSXPRingWidget widget named XPRing.
+	 *  Optional -- HUD compiles without it if you haven't added it yet. */
+	UPROPERTY(meta = (BindWidgetOptional))
+	class UHSXPRingWidget* XPRing;
 
 	/*****************************************************/
 	/*                   Config                          */

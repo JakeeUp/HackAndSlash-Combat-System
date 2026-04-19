@@ -4,6 +4,7 @@
 #include "HSPlayerHUD.h"
 
 #include "Character/HSPlayerCharacter.h"
+#include "UI/HSXPRingWidget.h"
 
 #include "Components/Image.h"
 #include "Components/ProgressBar.h"
@@ -64,6 +65,12 @@ void UHSPlayerHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	if (HPText)
 	{
 		HPText->SetText(FText::FromString(FString::Printf(TEXT("HP  %d"), FMath::RoundToInt(CachedPlayer->GetCurrentHealth()))));
+	}
+
+	// Level text -- update every tick so level-ups from XP orbs show immediately
+	if (LevelText)
+	{
+		LevelText->SetText(FText::FromString(FString::Printf(TEXT("Lv. %d"), CachedPlayer->GetPlayerLevel())));
 	}
 
 	// FF16 Movement Sway — shift the HUD opposite to player velocity

@@ -2,6 +2,7 @@
 
 #include "Character/HSEnemyCombatAI.h"
 #include "Character/HSEnemyAIController.h"
+#include "Character/HSXPOrb.h"
 #include "UI/HSDamageNumber.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -145,6 +146,9 @@ void AHSDummyEnemy::HandleHitReaction(float DamageAmount, AActor* DamageCauser, 
 
 	// Hitstop
 	ApplyHitstop(HitWeight);
+
+	// Red overlay flash -- player gets immediate visual confirmation of damage landing.
+	FlashDamageOverlay();
 
 	// Hit react animation -- pick montage based on enemy state.
 	// Launcher hits skip the montage entirely -- the ABP state machine
@@ -360,6 +364,13 @@ void AHSDummyEnemy::Die()
 	// Restore in case we die during hitstop
 	EndHitstop();
 
+	// Kill any active damage flash so it doesn't linger on the death pose
+	GetWorldTimerManager().ClearTimer(DamageFlashTimerHandle);
+	ClearDamageFlash();
+
+	// Scatter XP orbs from the death location
+	SpawnXPOrbs();
+
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	GetCharacterMovement()->DisableMovement();
 
@@ -376,4 +387,50 @@ void AHSDummyEnemy::Die()
 	{
 		Destroy();
 	}), DeathCleanupDelay, false);
+}
+
+void AHSDummyEnemy::FlashDamageOverlay()
+{
+	if (!DamageFlashMaterial) return;
+
+	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	{
+		MeshComp->SetOverlayMaterial(DamageFlashMaterial);
+	}
+
+	// Reset the clear timer so rapid hits extend the flash cleanly.
+	GetWorldTimerManager().ClearTimer(DamageFlashTimerHandle);
+	GetWorldTimerManager().SetTimer(DamageFlashTimerHandle, this, &AHSDummyEnemy::ClearDamageFlash, DamageFlashDuration, false);
+}
+
+void AHSDummyEnemy::ClearDamageFlash()
+{
+	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	{
+		MeshComp->SetOverlayMaterial(nullptr);
+	}
+}
+
+void AHSDummyEnemy::SpawnXPOrbs()
+{
+	if (!XPOrbClass || XPReward <= 0.f || XPOrbCount <= 0) return;
+
+	const float XPPerOrb = XPReward / static_cast<float>(XPOrbCount);
+	const FVector SpawnOrigin = GetActorLocation() + FVector(0.f, 0.f, 40.f);
+
+	for (int32 i = 0; i < XPOrbCount; ++i)
+	{
+		// Spread orbs evenly around a full circle so they fan out rather than cluster.
+		const float Angle = (360.f / XPOrbCount) * i + FMath::FRandRange(-15.f, 15.f);
+		const FVector ScatterDir(
+			FMath::Cos(FMath::DegreesToRadians(Angle)),
+			FMath::Sin(FMath::DegreesToRadians(Angle)),
+			0.f
+		);
+
+		if (AHSXPOrb* Orb = GetWorld()->SpawnActor<AHSXPOrb>(XPOrbClass, SpawnOrigin, FRotator::ZeroRotator))
+		{
+			Orb->Initialize(XPPerOrb, ScatterDir);
+		}
+	}
 }

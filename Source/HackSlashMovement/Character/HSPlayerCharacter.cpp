@@ -102,6 +102,8 @@ void AHSPlayerCharacter::BeginPlay()
 
 	CurrentHealth = MaxHealth;
 	CurrentMP = MaxMP;
+	CurrentXP = 0.f;
+	XPToNextLevel = BaseXPToLevel;
 
 	if (APlayerController* PC = Cast<APlayerController>(Controller))
 	{
@@ -1101,6 +1103,22 @@ void AHSPlayerCharacter::PlayAttackGrunt(bool bIsHeavy)
 	if (USoundBase* Sound = Pool[Idx])
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, Sound, GetActorLocation(), GruntVolumeMultiplier);
+	}
+}
+
+void AHSPlayerCharacter::AddXP(float Amount)
+{
+	if (Amount <= 0.f) return;
+
+	CurrentXP += Amount;
+
+	// Support levelling up multiple times from one large XP gain.
+	while (CurrentXP >= XPToNextLevel && XPToNextLevel > 0.f)
+	{
+		CurrentXP -= XPToNextLevel;
+		PlayerLevel++;
+		// Each level requires progressively more XP.
+		XPToNextLevel = FMath::RoundToFloat(BaseXPToLevel * FMath::Pow(XPScalePerLevel, static_cast<float>(PlayerLevel - 1)));
 	}
 }
 

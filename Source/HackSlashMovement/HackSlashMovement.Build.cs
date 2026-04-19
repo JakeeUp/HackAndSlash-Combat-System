@@ -19,6 +19,7 @@ public class HackSlashMovement : ModuleRules
 			"GameplayStateTreeModule",
 			"UMG",
 			"Slate",
+			"SlateCore",
 			"AnimGraphRuntime",
 			"Niagara",
 			"PhysicsCore"
