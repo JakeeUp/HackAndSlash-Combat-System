@@ -14,6 +14,7 @@
 
 #include "Combat/HSCombatComponent.h"
 #include "Combat/HSStyleComponent.h"
+#include "Combat/HSDynamicCameraComponent.h"
 #include "UI/HSStyleHUD.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/KismetSystemLibrary.h"
@@ -82,6 +83,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 
 	Combat = CreateDefaultSubobject<UHSCombatComponent>(TEXT("Combat"));
 	Style = CreateDefaultSubobject<UHSStyleComponent>(TEXT("Style"));
+	DynamicCamera = CreateDefaultSubobject<UHSDynamicCameraComponent>(TEXT("DynamicCamera"));
 
 	BGMAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("BGMAudio"));
 	BGMAudio->SetupAttachment(RootComponent);
@@ -199,15 +201,30 @@ void AHSPlayerCharacter::Tick(float DeltaTime)
 			const FVector MyLoc = GetActorLocation();
 			const FVector EnemyLoc = LockedTarget->GetActorLocation();
 
+			// DmC 2013 pattern: when either combatant is airborne, bias focus more toward the target
+			// so the enemy stays framed during juggles. Ground duels use the standard bias.
+			const bool bPlayerFalling = GetCharacterMovement()->IsFalling();
+			const bool bTargetFalling = false;  // placeholder -- could check target's falling state if it's a character
+			const bool bAnyoneAirborne = bPlayerFalling || bTargetFalling;
+			const float EffectiveFocusBias = bAnyoneAirborne ? LockOnFocusBiasAir : LockOnFocusBias;
+
 			// DMC3 pattern: focus point between both characters horizontally,
 			// but at a FIXED HEIGHT above the HIGHER of the two characters.
 			// This prevents the camera from going under terrain on slopes.
 			const float HigherZ = FMath::Max(MyLoc.Z, EnemyLoc.Z);
 
+			// During a cinematic hero shot the camera is deliberately positioned low and
+			// the shot defines its own framing, so we pull the focus point DOWN toward
+			// target chest height. Otherwise the normal high focus forces a huge upward
+			// pitch that slams into the min-camera-height safety and points the camera
+			// at the ground.
+			const float CineWForFocus = DynamicCamera ? DynamicCamera->GetCinematicBlendWeight() : 0.f;
+			const float EffectiveFocusHeight = FMath::Lerp(LockOnFocusHeight, 0.f, CineWForFocus);
+
 			FVector FocusPoint;
-			FocusPoint.X = FMath::Lerp(MyLoc.X, EnemyLoc.X, LockOnFocusBias);
-			FocusPoint.Y = FMath::Lerp(MyLoc.Y, EnemyLoc.Y, LockOnFocusBias);
-			FocusPoint.Z = HigherZ + LockOnFocusHeight;
+			FocusPoint.X = FMath::Lerp(MyLoc.X, EnemyLoc.X, EffectiveFocusBias);
+			FocusPoint.Y = FMath::Lerp(MyLoc.Y, EnemyLoc.Y, EffectiveFocusBias);
+			FocusPoint.Z = HigherZ + EffectiveFocusHeight;
 
 			if (APlayerController* PC = Cast<APlayerController>(Controller))
 			{
@@ -221,39 +238,87 @@ void AHSPlayerCharacter::Tick(float DeltaTime)
 
 				// DMC3 safety: if the resulting camera position would be below the player,
 				// push the pitch back up. Calculate where the camera would end up.
-				const float ArmLen = CameraBoom ? CameraBoom->TargetArmLength : 500.f;
-				const FVector CamOffset = CameraBoom ? CameraBoom->SocketOffset : FVector::ZeroVector;
-				const float CamZ = MyLoc.Z + CamOffset.Z - ArmLen * FMath::Sin(FMath::DegreesToRadians(LookAt.Pitch));
-
-				if (CamZ < MyLoc.Z + LockOnMinCameraHeight)
+				// SKIP this entirely when a cinematic shot is active -- the shot defines
+				// its own deliberate low-angle framing and this safety would force pitch
+				// to -90 (straight down at the ground) when the shot pulls the camera low.
+				if (CineWForFocus < 0.1f)
 				{
-					// Solve for the pitch that keeps the camera at minimum height
-					const float NeededSin = (MyLoc.Z + CamOffset.Z - (MyLoc.Z + LockOnMinCameraHeight)) / ArmLen;
-					LookAt.Pitch = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(NeededSin, -1.f, 1.f)));
+					const float ArmLen = CameraBoom ? CameraBoom->TargetArmLength : 500.f;
+					const FVector CamOffset = CameraBoom ? CameraBoom->SocketOffset : FVector::ZeroVector;
+					const float CamZ = MyLoc.Z + CamOffset.Z - ArmLen * FMath::Sin(FMath::DegreesToRadians(LookAt.Pitch));
+
+					if (CamZ < MyLoc.Z + LockOnMinCameraHeight)
+					{
+						// Solve for the pitch that keeps the camera at minimum height
+						const float NeededSin = (MyLoc.Z + CamOffset.Z - (MyLoc.Z + LockOnMinCameraHeight)) / ArmLen;
+						LookAt.Pitch = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(NeededSin, -1.f, 1.f)));
+					}
 				}
 
+				// DmC 2013 soft-lock: only interp pitch (and roll), keep player's yaw so the right stick
+				// can still orbit freely around the target. Hard lock (default) snaps yaw to target too.
 				const FRotator Current = PC->GetControlRotation();
-				const FRotator Interped = FMath::RInterpTo(Current, LookAt, DeltaTime, LockOnInterpSpeed);
+				FRotator TargetRot = LookAt;
+				if (bSoftLockYaw)
+				{
+					TargetRot.Yaw = Current.Yaw;
+				}
+
+				const FRotator Interped = FMath::RInterpTo(Current, TargetRot, DeltaTime, LockOnInterpSpeed);
 				PC->SetControlRotation(Interped);
 			}
 
 			// DMC3 pattern: separate arm lengths for ground vs air.
-			const bool bInAir = GetCharacterMovement()->IsFalling();
-			DesiredArmLength = bInAir ? LockOnArmLengthAir : LockOnArmLengthGround;
+			DesiredArmLength = bPlayerFalling ? LockOnArmLengthAir : LockOnArmLengthGround;
 		}
 	}
 
-	// Smooth interpolation for camera offset and arm length (lock-on transitions + ground/air)
+	// Smooth interpolation for camera offset and arm length (lock-on transitions + ground/air).
+	// DynamicCamera's additive offsets (kill cam pull-in, group pull-back) are folded into
+	// DesiredArmLength here so the existing interp handles the easing naturally.
+	// Cinematic shot (from anim notify) blends from normal framing toward specific hero-shot
+	// values weighted by the component's internal blend timer.
 	if (CameraBoom)
 	{
-		CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, DesiredCameraOffset, DeltaTime, LockOnArmInterpSpeed);
-		CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, DesiredArmLength, DeltaTime, LockOnArmInterpSpeed);
+		const float DynArmOffset = DynamicCamera ? DynamicCamera->GetArmLengthOffset() : 0.f;
+		const float CineW        = DynamicCamera ? DynamicCamera->GetCinematicBlendWeight() : 0.f;
+
+		float TargetArm = DesiredArmLength + DynArmOffset;
+		FVector TargetSocket = DesiredCameraOffset;
+
+		if (CineW > 0.f && DynamicCamera)
+		{
+			TargetArm    = FMath::Lerp(TargetArm,    DynamicCamera->GetCinematicArmLength(),   CineW);
+			TargetSocket = FMath::Lerp(TargetSocket, DynamicCamera->GetCinematicSocketOffset(), CineW);
+		}
+
+		CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocket, DeltaTime, LockOnArmInterpSpeed);
+		CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArm, DeltaTime, LockOnArmInterpSpeed);
+	}
+
+	// Apply dynamic camera rotational effects (trauma shake, velocity tilt, launch pitch).
+	if (DynamicCamera && FollowCamera)
+	{
+		FollowCamera->SetRelativeRotation(DynamicCamera->GetCameraRotationOffset());
 	}
 
 	// DMC-style FOV compression: zoom in slightly per hit, ease back passively
 	if (Combat)
 	{
 		Combat->UpdateFOVCompression(DeltaTime);
+	}
+
+	// Cinematic FOV override: layered AFTER combat's FOV compression so hero-shot FOV wins
+	// during the blend. Lerps from current (hit-compression-modulated) FOV toward cinematic FOV
+	// by the cinematic blend weight, so it never snaps.
+	if (DynamicCamera && FollowCamera)
+	{
+		const float CineW   = DynamicCamera->GetCinematicBlendWeight();
+		const float CineFOV = DynamicCamera->GetCinematicFOV();
+		if (CineW > 0.f && CineFOV > 0.f)
+		{
+			FollowCamera->FieldOfView = FMath::Lerp(FollowCamera->FieldOfView, CineFOV, CineW);
+		}
 	}
 }
 
@@ -276,6 +341,10 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		enhancedInputComp->BindAction(heavyAttackInputAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HeavyAttack);
 		enhancedInputComp->BindAction(dodgeInputAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::Dodge);
 		enhancedInputComp->BindAction(lockOnInputAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleLockOn);
+		if (lockOnSwitchInputAction)
+		{
+			enhancedInputComp->BindAction(lockOnSwitchInputAction, ETriggerEvent::Triggered, this, &AHSPlayerCharacter::SwitchLockOnFromInput);
+		}
 		enhancedInputComp->BindAction(projectileInputAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::FireProjectile);
 		enhancedInputComp->BindAction(pullInputAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::PullEnemy);
 	}
@@ -537,6 +606,107 @@ AActor* AHSPlayerCharacter::FindLockOnTarget() const
 		// Score: prefer targets closer to center of screen and closer distance
 		const float Dist = FVector::Dist(MyLoc, Actor->GetActorLocation());
 		const float Score = Dot * 1000.f - Dist;
+
+		if (Score > BestScore)
+		{
+			BestScore = Score;
+			Best = Actor;
+		}
+	}
+
+	return Best;
+}
+
+void AHSPlayerCharacter::SwitchLockOnFromInput(const FInputActionValue& InputValue)
+{
+	if (!LockedTarget) return;  // only active while already locked on
+
+	const FVector2D FlickRaw = InputValue.Get<FVector2D>();
+	if (FlickRaw.Size() < LockOnSwitchFlickThreshold) return;
+
+	// Cooldown so one flick = one switch (otherwise right-stick hold would chew through enemies)
+	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	if (Now - LastLockOnSwitchTime < LockOnSwitchCooldown) return;
+
+	AActor* NewTarget = FindLockOnTargetInDirection(FlickRaw);
+	if (!NewTarget || NewTarget == LockedTarget) return;
+
+	// Swap reticle to the new target
+	HideLockOnReticle();
+	LockedTarget = NewTarget;
+	ShowLockOnReticle(LockedTarget);
+
+	LastLockOnSwitchTime = Now;
+}
+
+AActor* AHSPlayerCharacter::FindLockOnTargetInDirection(const FVector2D& FlickDir) const
+{
+	if (!LockedTarget || !FollowCamera) return nullptr;
+
+	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
+	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn));
+
+	TArray<AActor*> IgnoreActors;
+	IgnoreActors.Add(const_cast<AHSPlayerCharacter*>(this));
+	IgnoreActors.Add(LockedTarget);  // exclude the current target
+
+	TArray<AActor*> FoundActors;
+	UKismetSystemLibrary::SphereOverlapActors(
+		GetWorld(),
+		GetActorLocation(),
+		LockOnRange,
+		ObjectTypes,
+		AHSDummyEnemy::StaticClass(),
+		IgnoreActors,
+		FoundActors
+	);
+
+	if (FoundActors.Num() == 0) return nullptr;
+
+	// Project each candidate into camera-space screen coords. Compare against the
+	// current locked target's screen position. Pick the one that best matches the
+	// flick direction in screen space.
+	const FVector CamRight   = FollowCamera->GetRightVector();
+	const FVector CamForward = FollowCamera->GetForwardVector();
+	const FVector CamLoc     = FollowCamera->GetComponentLocation();
+
+	// Reference: current target's projected right-axis and forward-axis coords
+	const FVector ToCurrent  = LockedTarget->GetActorLocation() - CamLoc;
+	const float CurrentRight = FVector::DotProduct(ToCurrent, CamRight);
+	const float CurrentFwd   = FVector::DotProduct(ToCurrent, CamForward);
+
+	// Screen-space: X = right, Y = forward-depth. Flick.X positive = right, Flick.Y positive = up.
+	// We want the candidate whose delta-right has the same sign as FlickDir.X (if non-zero)
+	// and whose screen distance from the current target is small -- closest in flick direction wins.
+	const FVector2D FlickNorm = FlickDir.GetSafeNormal();
+
+	AActor* Best = nullptr;
+	float BestScore = -1.f;
+
+	for (AActor* Actor : FoundActors)
+	{
+		if (!Actor || Actor->IsActorBeingDestroyed()) continue;
+
+		const FVector ToActor = Actor->GetActorLocation() - CamLoc;
+		const float ActorFwd  = FVector::DotProduct(ToActor, CamForward);
+		if (ActorFwd < 50.f) continue;  // behind the camera (or nearly so)
+
+		const float ActorRight = FVector::DotProduct(ToActor, CamRight);
+
+		// Delta in screen-right axis, normalized by reference distance so it's framerate / scale independent
+		const float DeltaRight = ActorRight - CurrentRight;
+		const float DeltaFwd   = ActorFwd   - CurrentFwd;
+
+		const FVector2D DeltaScreen(DeltaRight, -DeltaFwd);  // -DeltaFwd so "further" is up (positive Y)
+		if (DeltaScreen.IsNearlyZero()) continue;
+
+		const FVector2D DeltaNorm = DeltaScreen.GetSafeNormal();
+		const float DirScore = FVector2D::DotProduct(DeltaNorm, FlickNorm);
+		if (DirScore < 0.2f) continue;  // not in the flick direction
+
+		// Prefer closer-in-flick-direction targets
+		const float Dist = DeltaScreen.Size();
+		const float Score = DirScore * 10000.f - Dist;
 
 		if (Score > BestScore)
 		{
@@ -1127,6 +1297,12 @@ void AHSPlayerCharacter::ReceiveEnemyAttack(float Damage)
 	if (bIsInvincible || Damage <= 0.f) return;
 
 	CurrentHealth = FMath::Max(0.f, CurrentHealth - Damage);
+
+	// Add trauma -- drives the Perlin-noise camera shake.
+	if (DynamicCamera)
+	{
+		DynamicCamera->AddTrauma(0.45f);
+	}
 
 	// Brief invincibility window so a single enemy attack can't multi-hit
 	bIsInvincible = true;

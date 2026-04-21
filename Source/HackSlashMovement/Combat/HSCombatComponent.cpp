@@ -3,6 +3,7 @@
 #include "Character/HSPlayerCharacter.h"
 #include "Combat/HSDamageable.h"
 #include "Combat/HSStyleComponent.h"
+#include "Combat/HSDynamicCameraComponent.h"
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -473,6 +474,39 @@ void UHSCombatComponent::DoSwordTrace()
 	if (bLandedHit)
 	{
 		CurrentFOVCompression = FMath::Min(CurrentFOVCompression + FOVCompressionPerHit, MaxFOVCompression);
+	}
+
+	// Trauma-based camera shake. DmC 2013 favors hitstop over shake, but a small
+	// Perlin-trauma nudge sells the impact without overwhelming the frame.
+	// Scale by hit weight so light pokes barely move the camera and finishers/launchers snap it.
+	if (bLandedHit && OwnerChar)
+	{
+		if (UHSDynamicCameraComponent* DynCam = OwnerChar->GetDynamicCamera())
+		{
+			float TraumaAmount = 0.12f;  // light / mid-combo default
+			float PitchKick    = 0.f;    // upward tilt bias for heavier hits
+
+			switch (HitWeight)
+			{
+			case EHitWeight::EHW_Light:    TraumaAmount = 0.12f; break;
+			case EHitWeight::EHW_Heavy:    TraumaAmount = 0.22f; break;
+			case EHitWeight::EHW_Finisher: TraumaAmount = 0.30f; PitchKick = 3.f; break;
+			case EHitWeight::EHW_Launcher: TraumaAmount = 0.30f; PitchKick = 6.f; break;
+			default: break;
+			}
+
+			// Heavy attack type bumps trauma a notch regardless of weight (charged swings feel weightier).
+			if (CurrentAttackType == EAttackType::EAT_Heavy)
+			{
+				TraumaAmount = FMath::Min(TraumaAmount + 0.04f, 1.f);
+			}
+
+			DynCam->AddTrauma(TraumaAmount);
+			if (PitchKick > 0.f)
+			{
+				DynCam->AddPitchKick(PitchKick);
+			}
+		}
 	}
 }
 

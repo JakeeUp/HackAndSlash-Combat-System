@@ -3,6 +3,8 @@
 #include "Character/HSEnemyCombatAI.h"
 #include "Character/HSEnemyAIController.h"
 #include "Character/HSXPOrb.h"
+#include "Character/HSPlayerCharacter.h"
+#include "Combat/HSDynamicCameraComponent.h"
 #include "UI/HSDamageNumber.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -307,6 +309,21 @@ void AHSDummyEnemy::ApplyKnockback(const FVector& HitDirection, EHitWeight HitWe
 	if (Lift > 0.f && EnemyState != EEnemyState::EES_Down)
 	{
 		EnemyState = EEnemyState::EES_Airborne;
+
+		// Tell the player camera to tilt upward so the juggle is visible
+		if (HitWeight == EHitWeight::EHW_Launcher)
+		{
+			if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+			{
+				if (AHSPlayerCharacter* Player = Cast<AHSPlayerCharacter>(PC->GetPawn()))
+				{
+					if (UHSDynamicCameraComponent* DynCam = Player->GetDynamicCamera())
+					{
+						DynCam->NotifyEnemyLaunched();
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -370,6 +387,18 @@ void AHSDummyEnemy::Die()
 
 	// Scatter XP orbs from the death location
 	SpawnXPOrbs();
+
+	// Notify player's dynamic camera -- triggers kill cam if this was the last enemy
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+	{
+		if (AHSPlayerCharacter* Player = Cast<AHSPlayerCharacter>(PC->GetPawn()))
+		{
+			if (UHSDynamicCameraComponent* DynCam = Player->GetDynamicCamera())
+			{
+				DynCam->NotifyEnemyKill();
+			}
+		}
+	}
 
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	GetCharacterMovement()->DisableMovement();

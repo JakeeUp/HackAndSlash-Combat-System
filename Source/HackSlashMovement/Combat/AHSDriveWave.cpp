@@ -4,6 +4,7 @@
 
 #include "Character/HSPlayerCharacter.h"
 #include "Combat/HSDamageable.h"
+#include "Combat/HSDynamicCameraComponent.h"
 #include "Components/BoxComponent.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Engine/EngineTypes.h"
@@ -102,7 +103,20 @@ void AHSDriveWave::CheckOverlaps()
 
 		if (!Actor->GetClass()->ImplementsInterface(UHSDamageable::StaticClass())) continue;
 
+		const bool bWasFirstHit = (HitActors.Num() == 0);
 		HitActors.Add(Actor);
+
+		// Heavy trauma + upward pitch kick on the first enemy the wave catches --
+		// sells the "ground-shaking drive cuts through the fight" moment without stacking
+		// shake every frame the wave pierces through another enemy.
+		if (bWasFirstHit && OwnerPlayer)
+		{
+			if (UHSDynamicCameraComponent* DynCam = OwnerPlayer->GetDynamicCamera())
+			{
+				DynCam->AddTrauma(0.22f);
+				DynCam->AddPitchKick(4.f);
+			}
+		}
 
 		// Direction is always the wave's forward (push enemies away from the player).
 		const FVector HitDir = GetActorForwardVector();

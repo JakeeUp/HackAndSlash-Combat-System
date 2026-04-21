@@ -4,6 +4,8 @@
 #include "HSHomingProjectile.h"
 #include "HSDamageable.h"
 #include "HSStyleComponent.h"
+#include "HSDynamicCameraComponent.h"
+#include "Character/HSPlayerCharacter.h"
 #include "GameFramework/PlayerController.h"
 
 #include "Components/SphereComponent.h"
@@ -107,6 +109,16 @@ void AHSHomingProjectile::OnOverlap(UPrimitiveComponent* OverlappedComp, AActor*
 				{
 					PC->ClientStartCameraShake(ImpactCameraShake, ImpactShakeScale);
 				}
+			}
+		}
+
+		// Trauma-based subtle shake. Projectile hits should feel lighter than melee -- DmC 2013
+		// keeps ranged hits mostly muzzle-flash with a small camera nudge so they don't spam shake.
+		if (AHSPlayerCharacter* InstigatorPlayer = Cast<AHSPlayerCharacter>(CachedInstigator))
+		{
+			if (UHSDynamicCameraComponent* DynCam = InstigatorPlayer->GetDynamicCamera())
+			{
+				DynCam->AddTrauma(0.06f);
 			}
 		}
 	}

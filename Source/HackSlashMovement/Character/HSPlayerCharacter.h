@@ -13,6 +13,7 @@ class UInputAction;
 class UAnimMontage;
 class UHSCombatComponent;
 class UHSStyleComponent;
+class UHSDynamicCameraComponent;
 class UHSStyleHUD;
 class UHSLockOnReticle;
 class UUserWidget;
@@ -68,6 +69,9 @@ public:
 	class UHSStyleComponent* Style;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	class UHSDynamicCameraComponent* DynamicCamera;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UAudioComponent* BGMAudio;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -97,6 +101,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "State")
 	FORCEINLINE UHSStyleComponent* GetStyle() const { return Style; }
+
+	UFUNCTION(BlueprintPure, Category = "State")
+	FORCEINLINE UHSDynamicCameraComponent* GetDynamicCamera() const { return DynamicCamera; }
 
 	UFUNCTION(BlueprintPure, Category = "State")
 	FORCEINLINE FVector2D GetMoveInputCached() const { return moveInputCached; }
@@ -165,34 +172,38 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
 	float LockOnInterpSpeed = 8.f;
 
-	/** Camera boom socket offset when locked on. Reduced Y keeps action centered; Z raises the POV. */
+	/** Camera boom socket offset when locked on. DmC 2013 frames the target in the upper-right
+	 *  third with a near-eye-level camera (Z kept low, Y moderate) so the player doesn't dominate. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
-	FVector LockOnCameraOffset = FVector(0.f, 60.f, 120.f);
+	FVector LockOnCameraOffset = FVector(0.f, 75.f, 90.f);
 
-	/** Arm length when grounded and locked on. FF16 keeps a wide shot so both characters are visible. */
+	/** Arm length when grounded and locked on. Pulled back further than the free-cam base (400)
+	 *  so the player + target both fit with breathing room, then the tight Y offset + pitch creates OTS feel. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
-	float LockOnArmLengthGround = 700.f;
+	float LockOnArmLengthGround = 500.f;
 
-	/** Arm length during air combos. Pulls back further so you can see the full action. */
+	/** Arm length during air combos. Pulls back further so vertical juggles are fully visible. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
-	float LockOnArmLengthAir = 850.f;
+	float LockOnArmLengthAir = 600.f;
 
-	/** Pitch offset to angle the camera down during lock-on. */
+	/** Pitch offset to angle the camera down during lock-on.  Mild -- DmC 2013 is mostly eye-level. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
-	float LockOnPitchOffset = -20.f;
+	float LockOnPitchOffset = -8.f;
 
-	/** Minimum pitch the camera can reach during lock-on (prevents looking straight up). Negative = looking down. */
+	/** Minimum pitch the camera can reach during lock-on (prevents looking straight up). Negative = looking down.
+	 *  Widened to -55 so airborne juggles stay in view when the target climbs overhead. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
-	float LockOnPitchMin = -45.f;
+	float LockOnPitchMin = -55.f;
 
 	/** Maximum pitch during lock-on (prevents camera going under the ground). */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
 	float LockOnPitchMax = 10.f;
 
 	/** The camera focus point uses this fixed height above the player, not the enemy's actual Z.
-	 *  DMC3 pattern: camera height stays stable, doesn't chase the enemy vertically. */
+	 *  DMC3 pattern: camera height stays stable, doesn't chase the enemy vertically.
+	 *  Dropped to ~chest-height (70) so the camera looks straight-ahead rather than up/down. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
-	float LockOnFocusHeight = 120.f;
+	float LockOnFocusHeight = 70.f;
 
 	/** Widget class for the lock-on reticle that appears on the enemy. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
@@ -206,9 +217,29 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float LockOnFocusBias = 0.45f;
 
-	/** Speed at which the arm length adjusts between ground and air distances. */
+	/** Focus bias used when the locked target is airborne (or the player is).  DmC 2013 weights
+	 *  the framing more strongly toward the target during juggles so the enemy stays centered. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float LockOnFocusBiasAir = 0.6f;
+
+	/** Soft lock (DmC 2013 style): camera interpolates pitch toward the target but the player retains
+	 *  yaw control via the right stick.  When false, yaw also snaps to target (hard lock, DMC3 style). */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
-	float LockOnArmInterpSpeed = 5.f;
+	bool bSoftLockYaw = false;
+
+	/** Seconds between target-switch flicks.  Prevents a single flick from ripping through every enemy. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn", meta = (ClampMin = "0.05"))
+	float LockOnSwitchCooldown = 0.25f;
+
+	/** Minimum right-stick magnitude to register a target-switch flick. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn", meta = (ClampMin = "0.1", ClampMax = "1.0"))
+	float LockOnSwitchFlickThreshold = 0.6f;
+
+	/** Speed at which the arm length + socket offset interpolate between states
+	 *  (ground/air, lock-on engage/release, cinematic shot blend).  Lower = softer, mushier transitions.
+	 *  DmC 2013 uses a gentle ease so the camera never snaps between modes. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LockOn")
+	float LockOnArmInterpSpeed = 3.f;
 
 	/** Minimum distance from the locked target that forward movement input will close.
 	 *  DMC3/FF16 "pocket": inside this radius, the toward-enemy component of movement
@@ -499,6 +530,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	UInputAction* lockOnInputAction;
 
+	/** Right-stick axis2D flick used to switch lock-on target while locked on. */
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	UInputAction* lockOnSwitchInputAction;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	UInputAction* projectileInputAction;
 
@@ -553,7 +588,18 @@ private:
 	UFUNCTION()
 	void ToggleLockOn();
 
+	/** Bound to the right-stick flick InputAction. Switches lock-on target in the flick direction. */
+	UFUNCTION()
+	void SwitchLockOnFromInput(const FInputActionValue& InputValue);
+
 	AActor* FindLockOnTarget() const;
+
+	/** Find the best lock-on target in the given screen-space direction relative to the
+	 *  current locked target.  FlickDir.X > 0 = look right, < 0 = left.  Y > 0 = further, < 0 = nearer. */
+	AActor* FindLockOnTargetInDirection(const FVector2D& FlickDir) const;
+
+	/** Time (seconds) at which the last target switch fired -- used to cooldown rapid flicks. */
+	float LastLockOnSwitchTime = -1000.f;
 
 	UFUNCTION()
 	void FireProjectile();
