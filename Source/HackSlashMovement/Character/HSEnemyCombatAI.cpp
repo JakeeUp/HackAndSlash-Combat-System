@@ -52,6 +52,25 @@ void UHSEnemyCombatAI::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 		return;
 	}
 
+	// ── Training-dummy gate ──────────────────────────────────────────────────
+	// Toggled on the dummy to make it a passive target: drop any held attack
+	// token, stop walking, and skip every state tick. Hit reacts still work
+	// because they run on the actor itself, not here.
+	if (OwnerEnemy->bTrainingDummy)
+	{
+		if (bHoldsToken)
+		{
+			ReleaseTokenIfHeld();
+		}
+		if (AIState != EAIState::Idle)
+		{
+			AIState = EAIState::Idle;
+		}
+		SetMovementSpeed(0.f);
+		StopNavMovement();
+		return;
+	}
+
 	// Lazily find the player if we lost the reference
 	if (!PlayerChar)
 	{

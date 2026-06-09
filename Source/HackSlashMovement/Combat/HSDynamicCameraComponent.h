@@ -47,6 +47,18 @@ public:
 	 *  Useful for side-directional hits/kickback so the camera "snaps" in the direction of impact. */
 	void AddRollKick(float Degrees);
 
+	/** Apply a transient positional kick to the camera -- a 3D impulse that spring-dampens back
+	 *  to zero over a fraction of a second.  Layers on top of the existing shake + pitch/roll
+	 *  kicks.  Use for per-hit impact feel (DMC / FF16 "camera recoil") -- direction opposite
+	 *  the swing axis, magnitude scaled by hit weight.
+	 *  @param Impulse  World-space velocity added to the kick spring.  8-25 typical. */
+	UFUNCTION(BlueprintCallable, Category = "Camera|Kick")
+	void AddPositionalKick(FVector Impulse);
+
+	/** Current positional-kick offset.  Player Tick should add this to CameraBoom->SocketOffset
+	 *  this frame so the visual snap rides on top of the interpolated lock-on framing. */
+	FORCEINLINE FVector GetPositionalKickOffset() const { return CurrentKickOffset; }
+
 	/*****************************************************/
 	/*           Output queried by player Tick           */
 	/*****************************************************/
@@ -225,6 +237,25 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|LaunchPitch", meta = (ClampMin = "0.1"))
 	float RollKickDecaySpeed = 8.f;
 
+	// ── Positional kick (per-hit 3D recoil) ─────────────────────────────────
+
+	/** Spring stiffness for the positional kick.  Higher = snaps back faster; 300-500 feels DMC-ish. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Kick", meta = (ClampMin = "1.0"))
+	float KickSpringStiffness = 380.f;
+
+	/** Damping coefficient.  Approximately 2*sqrt(stiffness) for critical damping; lower = more
+	 *  visible overshoot (ok for DMC), higher = more clinical snap-back. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Kick", meta = (ClampMin = "1.0"))
+	float KickSpringDamping = 26.f;
+
+	/** Hard clamp on the kick offset magnitude in units.  Prevents a runaway impulse from yanking
+	 *  the camera across the screen if someone scales the call site wrong. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Kick", meta = (ClampMin = "1.0"))
+	float KickMaxOffset = 55.f;
+
+	FVector CurrentKickOffset   = FVector::ZeroVector;
+	FVector CurrentKickVelocity = FVector::ZeroVector;
+
 	// ── Trauma shake ──────────────────────────────────────────────────────
 	float Trauma    = 0.f;
 	float NoiseTime = 0.f;
@@ -278,6 +309,7 @@ private:
 	void UpdateTrauma(float DeltaTime);
 	void UpdateGroupPullback(float DeltaTime);
 	void UpdateCinematicShot(float DeltaTime);
+	void UpdatePositionalKick(float DeltaTime);
 
 	/** Returns true if no living AHSDummyEnemy exists within KillCamScanRange. */
 	bool CheckNoLivingEnemiesInRange() const;

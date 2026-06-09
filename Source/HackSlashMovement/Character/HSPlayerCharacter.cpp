@@ -175,6 +175,19 @@ void AHSPlayerCharacter::BeginPlay()
 	);
 }
 
+void AHSPlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// Clear every timer this actor owns so pending callbacks (combat-music proximity check,
+	// invincibility expiry, combat-linger exit) can't fire on a destroyed pawn when the level
+	// unloads or the character is killed.  Cheap safety net; doesn't hurt in the happy path.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearAllTimersForObject(this);
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
 void AHSPlayerCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -294,6 +307,14 @@ void AHSPlayerCharacter::Tick(float DeltaTime)
 
 		CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocket, DeltaTime, LockOnArmInterpSpeed);
 		CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArm, DeltaTime, LockOnArmInterpSpeed);
+
+		// DMC/FF16 positional "kick" on hit -- spring-damped 3D impulse that rides ON TOP of the
+		// interpolated framing.  Added post-interp so the spring's natural dynamics play out
+		// instead of being smeared by the 8-12Hz VInterpTo.  Decays to zero on its own.
+		if (DynamicCamera)
+		{
+			CameraBoom->SocketOffset += DynamicCamera->GetPositionalKickOffset();
+		}
 	}
 
 	// Apply dynamic camera rotational effects (trauma shake, velocity tilt, launch pitch).
@@ -306,6 +327,14 @@ void AHSPlayerCharacter::Tick(float DeltaTime)
 	if (Combat)
 	{
 		Combat->UpdateFOVCompression(DeltaTime);
+
+		// Held-light mid-air loop -- Combat starts/auto-replays the loop montage while
+		// the light-attack button stays held AND the player is airborne, stops it on release/land.
+		Combat->UpdateAirHoldLoop(bLightAttackHeld, GetCharacterMovement()->IsFalling());
+
+		// DMC-style attack magnet: slides us to an ideal stand-off distance in front of
+		// the target over the first few frames of each swing.  No-op when idle.
+		Combat->UpdateMagnetSlide(DeltaTime);
 	}
 
 	// Cinematic FOV override: layered AFTER combat's FOV compression so hero-shot FOV wins
@@ -338,6 +367,7 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		enhancedInputComp->BindAction(sprintInputAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::StartSprint);
 		enhancedInputComp->BindAction(sprintInputAction, ETriggerEvent::Completed, this, &AHSPlayerCharacter::StopSprint);
 		enhancedInputComp->BindAction(lightAttackInputAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::LightAttack);
+		enhancedInputComp->BindAction(lightAttackInputAction, ETriggerEvent::Completed, this, &AHSPlayerCharacter::StopLightAttack);
 		enhancedInputComp->BindAction(heavyAttackInputAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HeavyAttack);
 		enhancedInputComp->BindAction(dodgeInputAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::Dodge);
 		enhancedInputComp->BindAction(lockOnInputAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleLockOn);
@@ -500,6 +530,9 @@ void AHSPlayerCharacter::LightAttack()
 	if (bIsDodging) return;
 	if (!Combat) return;
 
+	// Flag the held state so Tick can drive the air-hold loop while the button stays down.
+	bLightAttackHeld = true;
+
 	if (GetCharacterMovement()->IsFalling())
 	{
 		Combat->TryAirAttack();
@@ -513,6 +546,11 @@ void AHSPlayerCharacter::LightAttack()
 	{
 		Combat->TryLightAttack();
 	}
+}
+
+void AHSPlayerCharacter::StopLightAttack()
+{
+	bLightAttackHeld = false;
 }
 
 void AHSPlayerCharacter::HeavyAttack()
@@ -879,7 +917,15 @@ void AHSPlayerCharacter::Dodge()
 	if (!Movement) return;
 
 	const bool bInAir = Movement->IsFalling();
-	if (bInAir && AirDodgesUsed >= MaxAirDodges) return;
+
+	// Canceling a mid-air attack with a dodge is treated as a "free" air dash (DMC3/FF16 pattern)
+	// when bRefundAirDodgeOnAttackCancel is true.  We check IsAttacking BEFORE the budget gate so
+	// a player out of air dodges can still cancel a swing into a dash.
+	const bool bWasAttacking        = Combat && Combat->IsAttacking();
+	const bool bCancelingAirAttack  = bInAir && bWasAttacking;
+	const bool bFreeCancelDash      = bCancelingAirAttack && bRefundAirDodgeOnAttackCancel;
+
+	if (bInAir && !bFreeCancelDash && AirDodgesUsed >= MaxAirDodges) return;
 
 	USkeletalMeshComponent* MeshComp = GetMesh();
 	UAnimInstance* AnimInst = MeshComp ? MeshComp->GetAnimInstance() : nullptr;
@@ -892,9 +938,6 @@ void AHSPlayerCharacter::Dodge()
 	// backstep anim and keep the current facing.
 	UAnimMontage* Montage = GetDodgeMontage(bHasInput ? 0 : 1);
 	if (!Montage) return;
-
-	// Dodging only rewards style points if used mid-combat (cancel dodge)
-	const bool bWasAttacking = Combat && Combat->IsAttacking();
 
 	// Dodge cancels active attack montages
 	if (bWasAttacking)
@@ -931,10 +974,22 @@ void AHSPlayerCharacter::Dodge()
 
 	if (bInAir)
 	{
-		AirDodgesUsed++;
+		// Only consume an air dodge charge when it's NOT a free cancel-dash.  Canceling a
+		// mid-air swing shouldn't burn the budget (DMC3 "jump-cancel dash" feel).
+		if (!bFreeCancelDash)
+		{
+			AirDodgesUsed++;
+		}
 
-		// Air dodge gets a launch impulse so it feels like a real dash
-		const FVector Launch = DodgeWorldDir * AirDodgeLaunchSpeed + FVector(0.f, 0.f, AirDodgeVerticalLift);
+		// Air dodge gets a launch impulse so it feels like a real dash.  Cancel-dashes off an
+		// active mid-air attack get a bigger impulse and a small upward reset so the flow
+		// reads as a proper DMC/FF16 cancel dash, not a plain dodge.
+		const float  SpeedMult = bCancelingAirAttack ? AttackCancelDodgeBoost : 1.f;
+		const float  VertLift  = bCancelingAirAttack
+		                         ? FMath::Max(AirDodgeVerticalLift, AttackCancelDodgeVerticalLift)
+		                         : AirDodgeVerticalLift;
+
+		const FVector Launch = DodgeWorldDir * (AirDodgeLaunchSpeed * SpeedMult) + FVector(0.f, 0.f, VertLift);
 		LaunchCharacter(Launch, true, true);
 	}
 
@@ -1109,18 +1164,18 @@ void AHSPlayerCharacter::PlayFootstep(FName FootBone)
 		Surface = Hit.PhysMaterial->SurfaceType;
 	}
 
-#if !UE_BUILD_SHIPPING
-	// Temporary diagnostic: visualize the trace and log what surface we read.
-	DrawDebugLine(GetWorld(), Start, End, bHit ? FColor::Green : FColor::Red, false, 2.f, 0, 1.f);
-	const FString HitActorName = bHit && Hit.GetActor() ? Hit.GetActor()->GetName() : TEXT("None");
-	const FString PhysMatName = bHit && Hit.PhysMaterial.IsValid() ? Hit.PhysMaterial->GetName() : TEXT("None");
-	UE_LOG(LogTemp, Warning, TEXT("[Footstep] Bone=%s Hit=%s Actor=%s PhysMat=%s Surface=%d"),
-		*FootBone.ToString(),
-		bHit ? TEXT("true") : TEXT("false"),
-		*HitActorName,
-		*PhysMatName,
-		static_cast<int32>(Surface));
-#endif
+//#if !UE_BUILD_SHIPPING
+//	// Temporary diagnostic: visualize the trace and log what surface we read.
+//	DrawDebugLine(GetWorld(), Start, End, bHit ? FColor::Green : FColor::Red, false, 2.f, 0, 1.f);
+//	const FString HitActorName = bHit && Hit.GetActor() ? Hit.GetActor()->GetName() : TEXT("None");
+//	const FString PhysMatName = bHit && Hit.PhysMaterial.IsValid() ? Hit.PhysMaterial->GetName() : TEXT("None");
+//	UE_LOG(LogTemp, Warning, TEXT("[Footstep] Bone=%s Hit=%s Actor=%s PhysMat=%s Surface=%d"),
+//		*FootBone.ToString(),
+//		bHit ? TEXT("true") : TEXT("false"),
+//		*HitActorName,
+//		*PhysMatName,
+//		static_cast<int32>(Surface));
+//#endif
 
 	// Pick VFX -- per-surface map first, fall back to default
 	UNiagaraSystem* VFXToPlay = nullptr;

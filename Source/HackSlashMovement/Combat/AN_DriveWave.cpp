@@ -38,5 +38,6 @@ void UAN_DriveWave::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* 
 	if (AHSDriveWave* Wave = World->SpawnActor<AHSDriveWave>(WaveClass, SpawnLoc, SpawnRot, Params))
 	{
 		Wave->Launch(Player, DamageAmount, HitWeight);
+		
 	}
 }

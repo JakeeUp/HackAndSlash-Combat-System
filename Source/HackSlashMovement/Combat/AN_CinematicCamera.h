@@ -28,18 +28,21 @@ public:
 	/*         Cinematic shot parameters                 */
 	/*****************************************************/
 
-	/** Arm length at the PEAK of the shot.  Low values (150-200) = close hero shot.
+	/** Arm length at the PEAK of the shot.  Low values (150-200) = close hero shot,
+	 *  200-260 = medium (both characters visible), 280+ = wide establishing.
 	 *  The camera will continue to push in during the hold via DollyArmDelta. */
 	UPROPERTY(EditAnywhere, Category = "Cinematic|Framing", meta = (ClampMin = "50.0"))
-	float ArmLength = 160.f;
+	float ArmLength = 210.f;
 
 	/** Socket offset at PEAK.
 	 *  X = forward bias, Y = right (positive pushes the player to the LEFT third of frame),
-	 *  Z = up (NEGATIVE = camera below player -- DmC 2013 reference shots sit at roughly
-	 *  knee/shin level, ~ -60 to -80.  Go lower than -90 and the min-height safety may fight
-	 *  the shot unless cinematic-blend-weight is high enough to bypass it). */
+	 *  Z = up (NEGATIVE = camera below player).  DmC 2013 hero shots sit at roughly
+	 *  hip-to-waist level on the player, NOT ankle level.  Values:
+	 *    -20 to -40  = waist/hip (default, looks heroic without eating the floor)
+	 *    -50 to -70  = thigh/knee (more dramatic, use for finishers)
+	 *    -80+        = shin/ankle (very extreme, min-camera-height safety may fight it). */
 	UPROPERTY(EditAnywhere, Category = "Cinematic|Framing")
-	FVector SocketOffset = FVector(-30.f, 90.f, -70.f);
+	FVector SocketOffset = FVector(-30.f, 90.f, -30.f);
 
 	/** FOV override at peak.  80-95 = cinematic wide, 60-70 = telephoto punch-in.  0 = don't override. */
 	UPROPERTY(EditAnywhere, Category = "Cinematic|Framing", meta = (ClampMin = "0.0", ClampMax = "170.0"))

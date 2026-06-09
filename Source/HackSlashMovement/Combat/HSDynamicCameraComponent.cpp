@@ -35,7 +35,11 @@ void UHSDynamicCameraComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	UpdateTrauma(DeltaTime);
 	UpdateGroupPullback(DeltaTime);
 	UpdateCinematicShot(DeltaTime);
+	UpdatePositionalKick(DeltaTime);
 
+	// The positional kick offset is exposed via GetPositionalKickOffset() and added to the
+	// spring-arm SocketOffset by player Tick -- not folded into ArmLengthOffset (which is a
+	// scalar; the kick is a 3D vector).
 	ArmLengthOffset = KillCamArmOffset + CurrentGroupPullback;
 }
 
@@ -76,6 +80,20 @@ void UHSDynamicCameraComponent::AddRollKick(float Degrees)
 {
 	// Additive in the direction the caller asked for.  Decays every frame.
 	CurrentRollKick += Degrees;
+}
+
+void UHSDynamicCameraComponent::AddPositionalKick(FVector Impulse)
+{
+	// Additive velocity injection into the spring-damped offset.  Multiple kicks in the same
+	// frame stack; the spring handles the settling naturally.  Clamp velocity magnitude so a
+	// bad call site (or chain of kicks in a single hit frame) can't punt the camera off-screen.
+	CurrentKickVelocity += Impulse;
+
+	const float MaxVel = KickMaxOffset * 40.f;   // coarse upper bound -- typical impulse is 8-25
+	if (CurrentKickVelocity.SizeSquared() > MaxVel * MaxVel)
+	{
+		CurrentKickVelocity = CurrentKickVelocity.GetSafeNormal() * MaxVel;
+	}
 }
 
 FRotator UHSDynamicCameraComponent::GetCameraRotationOffset() const
@@ -218,6 +236,35 @@ void UHSDynamicCameraComponent::UpdateGroupPullback(float DeltaTime)
 	}
 
 	CurrentGroupPullback = FMath::FInterpTo(CurrentGroupPullback, TargetGroupPullback, DeltaTime, PullbackInterpSpeed);
+}
+
+// ── Positional kick ──────────────────────────────────────────────────────────
+
+void UHSDynamicCameraComponent::UpdatePositionalKick(float DeltaTime)
+{
+	// Classic critically-ish damped harmonic oscillator.  Accel = -k*x - d*v, integrate v then x.
+	// Semi-implicit Euler (update v first) is more stable than explicit for stiff springs.
+	if (CurrentKickOffset.IsNearlyZero(0.01f) && CurrentKickVelocity.IsNearlyZero(0.1f))
+	{
+		// Already settled -- hard zero to avoid float drift.
+		CurrentKickOffset   = FVector::ZeroVector;
+		CurrentKickVelocity = FVector::ZeroVector;
+		return;
+	}
+
+	const FVector Accel = (-KickSpringStiffness * CurrentKickOffset) - (KickSpringDamping * CurrentKickVelocity);
+	CurrentKickVelocity += Accel * DeltaTime;
+	CurrentKickOffset   += CurrentKickVelocity * DeltaTime;
+
+	// Hard clamp the offset so runaway impulses can't yank the camera past KickMaxOffset.
+	const float OffsetMagSq = CurrentKickOffset.SizeSquared();
+	if (OffsetMagSq > KickMaxOffset * KickMaxOffset)
+	{
+		CurrentKickOffset   = CurrentKickOffset.GetSafeNormal() * KickMaxOffset;
+		// Damp velocity toward zero when we hit the clamp -- otherwise the spring would keep
+		// pumping energy into the boundary and oscillate weirdly.
+		CurrentKickVelocity *= 0.5f;
+	}
 }
 
 // ── Cinematic shot ───────────────────────────────────────────────────────────

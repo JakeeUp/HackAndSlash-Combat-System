@@ -45,6 +45,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
 	virtual void Tick(float DeltaTime) override;
@@ -347,6 +348,22 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Dodge")
 	float AirDodgeVerticalLift = 0.f;
 
+	/** Multiplier applied to AirDodgeLaunchSpeed when the air dodge is canceling an active
+	 *  mid-air attack.  DMC/FF16 "attack-cancel air dash" reads bigger than a neutral air
+	 *  dodge so the flow feels rewarding; 1.3-1.5 is the sweet spot. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Dodge", meta = (ClampMin = "1.0", ClampMax = "3.0"))
+	float AttackCancelDodgeBoost = 1.4f;
+
+	/** Extra upward impulse added when the air dodge cancels an active aerial attack.  Gives
+	 *  the cancel a small "reset" rise so the player keeps altitude for the follow-up. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Dodge", meta = (ClampMin = "0.0"))
+	float AttackCancelDodgeVerticalLift = 180.f;
+
+	/** If true, canceling a mid-air attack with a dodge refunds one of the used air dodges,
+	 *  so a cancel-dash off a swing doesn't burn the air-dodge budget.  DMC3 style. */
+	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Dodge")
+	bool bRefundAirDodgeOnAttackCancel = true;
+
 	/** After this fraction of the dodge has played, movement input cancels the dodge. */
 	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Dodge", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float DodgeCancelAfterFraction = 0.55f;
@@ -578,6 +595,15 @@ private:
 
 	UFUNCTION()
 	void LightAttack();
+
+	/** Bound to light-attack InputAction Completed -- clears the held-state flag so the
+	 *  air-hold loop stops when the button is released. */
+	UFUNCTION()
+	void StopLightAttack();
+
+	/** True while the light-attack button is held down (Started -> Completed).  Used by
+	 *  Tick to drive the held-light mid-air loop via Combat->UpdateAirHoldLoop. */
+	bool bLightAttackHeld = false;
 
 	UFUNCTION()
 	void HeavyAttack();

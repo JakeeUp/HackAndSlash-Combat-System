@@ -463,3 +463,54 @@ void AHSDummyEnemy::SpawnXPOrbs()
 		}
 	}
 }
+
+void AHSDummyEnemy::ApplyAirHang(float Duration, float GravScale, float Lift)
+{
+	if (bIsDead) return;
+
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!Movement) return;
+
+	// First call of a hang burst -- capture the current gravity so EndAirHang can put it back.
+	// Subsequent calls during an active hang just refresh the timer (and re-pop vertically) so
+	// we don't save the already-modified value.
+	if (!bAirHangActive)
+	{
+		AirHangSavedGravity = Movement->GravityScale;
+		bAirHangActive = true;
+	}
+
+	Movement->GravityScale = GravScale;
+
+	// Zero the downward velocity and give a small upward pop so the enemy floats crisply
+	// each time a hit connects, instead of slowly drifting down even on low gravity.
+	FVector Vel = Movement->Velocity;
+	Vel.Z = Lift;
+	Movement->Velocity = Vel;
+
+	// Reading the airborne flag so the ABP's air hit-react state activates visually.
+	// This is the same flag set by launcher knockbacks.
+	if (EnemyState != EEnemyState::EES_Down)
+	{
+		EnemyState = EEnemyState::EES_Airborne;
+	}
+
+	// Refresh the end-of-hang timer so as long as the player keeps connecting, the enemy
+	// keeps floating.  Single-shot -- ClearTimer first ensures we don't stack callbacks.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(AirHangTimerHandle);
+		World->GetTimerManager().SetTimer(AirHangTimerHandle, this, &AHSDummyEnemy::EndAirHang, Duration, false);
+	}
+}
+
+void AHSDummyEnemy::EndAirHang()
+{
+	if (!bAirHangActive) return;
+
+	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
+	{
+		Movement->GravityScale = AirHangSavedGravity;
+	}
+	bAirHangActive = false;
+}

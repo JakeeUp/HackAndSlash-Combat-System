@@ -2,13 +2,11 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "HSCombatTweakables.h"
 #include "HSCombatComponent.generated.h"
 
 
-class UAnimMontage;
 class AHSPlayerCharacter;
-class UCameraShakeBase;
-class USoundBase;
 
 
 UENUM(BlueprintType)
@@ -32,6 +30,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "Combat")
@@ -49,8 +48,25 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void CancelAttack();
 
+	/** Drives the held-light mid-air loop.  Called every frame by the player character Tick
+	 *  with the current held/airborne state.  Handles start, auto-replay while the built-in
+	 *  montage isn't looping, and blend-out when released or grounded.  Safe to call when
+	 *  AirHoldLoopMontage is unset -- early-outs. */
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void UpdateAirHoldLoop(bool bButtonHeld, bool bFalling);
+
+	/** Drives the attack-magnet slide.  Called every frame from AHSPlayerCharacter::Tick.
+	 *  No-op unless a slide was kicked off by the most recent swing.  Eases the player from
+	 *  the slide's start position to its target over MagnetSlideDuration seconds, then flags
+	 *  the slide as finished (capsule-ignore persists until attack ends via EndMagnet). */
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void UpdateMagnetSlide(float DeltaTime);
+
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	FORCEINLINE bool IsAttacking() const { return bIsAttacking; }
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	FORCEINLINE bool IsAirHoldActive() const { return bAirHoldActive; }
 
 	/** Called when the character lands -- restores gravity and resets air hit tracking. */
 	void OnOwnerLanded();
@@ -68,6 +84,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat|Notifies")
 	void CloseComboWindow();
 
+	/** Opens the DELAYED-input branch window.  Called by ANS_DelayedComboWindow.
+	 *  Place this AFTER the regular combo window on the timeline so a late light press
+	 *  here branches into LightDelayedComboMontages instead of the normal chain. */
+	UFUNCTION(BlueprintCallable, Category = "Combat|Notifies")
+	void OpenDelayedComboWindow();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Notifies")
+	void CloseDelayedComboWindow();
+
 	UFUNCTION(BlueprintCallable, Category = "Combat|Notifies")
 	void OnAttackFinished();
 
@@ -75,160 +100,8 @@ public:
 	void DoSwordTrace();
 
 protected:
-	/*****************************************************/
-	/*                    Configurations                 */
-	/*****************************************************/
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Montages")
-	TArray<UAnimMontage*> LightComboMontages;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Montages")
-	TArray<UAnimMontage*> HeavyComboMontages;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Montages")
-	TArray<UAnimMontage*> AirComboMontages;
-
-	/** DMC3 High Time / Rising attack montage (back+attack while locked on). */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Montages")
-	UAnimMontage* RisingAttackMontage;
-
-	/** How high the player launches on a rising attack. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Rising Attack")
-	float RisingLaunchForce = 1000.f;
-
-	/** Damage for the rising attack. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Rising Attack")
-	float RisingDamage = 20.f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Trace")
-	float TraceRange = 180.f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Trace")
-	float TraceRadius = 90.f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Damage")
-	float LightDamage = 8.f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Damage")
-	float HeavyDamage = 18.f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Damage")
-	float AirDamage = 10.f;
-
-	/** Gravity scale for the first air hit. Near-zero = full hang like DMC. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Air Combat", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float AirComboBaseGravity = 0.05f;
-
-	/** Extra gravity added per subsequent air hit. DMC3 uses ~0.15 so by hit 4 you're noticeably sinking. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Air Combat")
-	float AirComboGravityPerHit = 0.15f;
-
-	/** Vertical velocity is snapped to this when an air attack starts so the character doesn't keep rising or falling. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Air Combat")
-	float AirComboVerticalVelocitySnap = 0.f;
-
-	/** Camera shake played when a melee attack connects. Light hits use Scale 0.5, heavy hits use 1.0. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake")
-	TSubclassOf<UCameraShakeBase> HitCameraShake;
-
-	/** Scale for light attack camera shake. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake")
-	float LightHitShakeScale = 0.5f;
-
-	/** Scale for heavy attack camera shake. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake")
-	float HeavyHitShakeScale = 1.0f;
-
-	/** Scale for air attack camera shake. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake")
-	float AirHitShakeScale = 0.6f;
-
-	/** DMC-style subtle FOV compression per landed hit (degrees of zoom-in). Accumulates up to MaxFOVCompression. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake", meta = (ClampMin = "0.0"))
-	float FOVCompressionPerHit = 2.f;
-
-	/** Maximum total FOV compression that can accumulate across a combo (degrees). */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake", meta = (ClampMin = "0.0"))
-	float MaxFOVCompression = 8.f;
-
-	/** Speed at which FOV eases back to its default value when not actively hitting (FInterpTo speed). */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Camera Shake", meta = (ClampMin = "0.1"))
-	float FOVRecoverySpeed = 3.f;
-
-	/*****************************************************/
-	/*                    Sound Effects                  */
-	/*****************************************************/
-
-	/** Sword swing whoosh for light attacks. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
-	USoundBase* LightSwingSound;
-
-	/** Sword swing whoosh for heavy attacks. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
-	USoundBase* HeavySwingSound;
-
-	/** Sword swing for air attacks. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
-	USoundBase* AirSwingSound;
-
-	/** Rising attack swing sound. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
-	USoundBase* RisingSwingSound;
-
-	/** Impact sound when a light attack connects. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
-	USoundBase* LightHitSound;
-
-	/** Impact sound when a heavy attack connects. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
-	USoundBase* HeavyHitSound;
-
-	/** Impact sound for air hits. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
-	USoundBase* AirHitSound;
-
-	/** Impact sound for the rising/launcher attack. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|SFX")
-	USoundBase* RisingHitSound;
-
-	/*****************************************************/
-	/*               Screen Hit Effects                  */
-	/*****************************************************/
-
-	/** Brief white screen flash on heavy/rising hits (FF16 impact feel). */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Screen Effects")
-	float HeavyHitFlashIntensity = 0.3f;
-
-	/** How fast the screen flash fades out. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Screen Effects")
-	float HeavyHitFlashDuration = 0.12f;
-
-	/** Time dilation applied on launcher/finisher hits for dramatic impact. 0.1 = near freeze. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Screen Effects", meta = (ClampMin = "0.01", ClampMax = "1.0"))
-	float HitTimeDilationScale = 0.15f;
-
-	/** How long the time dilation lasts (real seconds). */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Screen Effects")
-	float HitTimeDilationDuration = 0.08f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Debug")
-	bool bDebugDrawTrace = true;
-
-	/** When true, buffered inputs only fire after the current montage fully ends (OnAttackFinished).
-	 *  When false (DMC default), buffered inputs fire as soon as OpenComboWindow is hit by an anim notify. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Combo")
-	bool bStrictFinishBeforeChain = false;
-
-	/** Forward nudge applied to the player at the start of each swing so combos stay in range of the enemy. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Combo")
-	float AttackStepInForce = 450.f;
-
-	/** Step-in force only applies while grounded (avoids turning air combos into forward dives). */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Combo")
-	bool bStepInGroundedOnly = true;
-
-	/** Max distance at which step-in still applies when locked on. Prevents teleporting through a far target. */
-	UPROPERTY(EditDefaultsOnly, Category = "Configurations|Combo")
-	float StepInMaxLockOnRange = 350.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Combat")
+	FHSCombatTweakables Tweakables;
 
 	/*****************************************************/
 	/*                        State                      */
@@ -242,6 +115,12 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
 	bool bComboWindowOpen = false;
 
+	/** True while the DELAYED-input notify state is active on the current swing.
+	 *  A light press while this is true (and the regular combo window has closed)
+	 *  immediately branches into LightDelayedComboMontages. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	bool bDelayedWindowOpen = false;
+
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
 	bool bSavedNextAttack = false;
 
@@ -254,13 +133,63 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
 	int32 ComboIndex = 0;
 
+	/** True when the player entered the delayed-input branch this combo string.  Cleared by ResetCombo.
+	 *  While set, GetMontageForCombo pulls from LightDelayedComboMontages instead of LightComboMontages. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	bool bOnDelayedBranch = false;
+
+	/** True when the player's initial light-press was tilted forward (toward target / camera-forward).
+	 *  Locks the current combo string to LightForwardComboMontages for its duration.  Cleared by
+	 *  ResetCombo.  Takes a back seat to bOnDelayedBranch -- a player who ends up on both branches
+	 *  in the same string gets delayed-branch priority (rarer, input-specific timing). */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	bool bOnForwardBranch = false;
+
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
 	bool bAirComboActive = false;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
 	int32 AirHitCount = 0;
 
-	float SavedGravityScale = 1.f;
+	/** True while the held-light mid-air loop montage is active. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	bool bAirHoldActive = false;
+
+	/** True once the player has released the button while airborne -- the Loop section has been
+	 *  rewired to transition into the Out section, but we're still technically "active" until
+	 *  Out finishes playing.  Lets a re-press mid-Out cancel the exit and jump back to looping. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	bool bAirHoldStopRequested = false;
+
+	/** Authoritative baseline gravity scale, captured ONCE in BeginPlay from the CMC's CDO value
+	 *  before any combat system can override it.  All gravity-restore paths set the CMC back to
+	 *  this value -- never to a "saved before override" snapshot, which used to cause a leak
+	 *  when air-combo + hold-loop stacked their overrides (each system saved the other's modified
+	 *  value as the "original", and gravity would stay low forever after the chain unwound). */
+	float DefaultGravityScale = 1.f;
+
+	/** True while the hold-loop is currently driving the player's gravity scale.  Gates restore
+	 *  so other systems (or a second hold-loop re-entry) don't double-save or clobber. */
+	bool bHoldGravityApplied = false;
+
+	/** True while the magnet slide is mid-flight between start and target.  Cleared once the
+	 *  ease completes OR the attack ends (whichever fires first via EndMagnet).  Note: the
+	 *  capsule-ignore on MagnetTargetActor persists for the full attack, not just this flag. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
+	bool bMagnetSliding = false;
+
+	/** Seconds elapsed into the current magnet slide (0 -> MagnetSlideDuration). */
+	float MagnetSlideElapsed = 0.f;
+
+	/** Captured player world position at the moment the slide started. */
+	FVector MagnetSlideStart = FVector::ZeroVector;
+
+	/** Target world position the slide is easing toward. */
+	FVector MagnetSlideTarget = FVector::ZeroVector;
+
+	/** Target the magnet is currently locked to this attack.  Stored weak so we can safely
+	 *  skip capsule-ignore cleanup if the target dies / despawns before the attack ends. */
+	TWeakObjectPtr<AActor> MagnetTargetActor;
 
 private:
 	void PlayNextAttack(EAttackType Type);
@@ -270,6 +199,11 @@ private:
 
 	/** Snap the owning character toward camera-relative input direction before each swing. */
 	void RotateOwnerToInput();
+
+	/** Returns true if the player's cached move input is tilted "forward" -- toward the locked
+	 *  target if one exists, otherwise along camera-forward.  Used at the start of a light combo
+	 *  to pick between LightComboMontages and LightForwardComboMontages. */
+	bool IsInputTiltForward() const;
 
 	/** Play the swing sound for the current attack type. */
 	void PlaySwingSound();
@@ -282,6 +216,28 @@ private:
 
 	/** Restore time dilation after hit freeze. */
 	void RestoreTimeDilation();
+
+	/** Pick a magnet target for this swing (lock-on target takes priority, else nearest enemy
+	 *  in the forward cone within MagnetSearchRadius) and arm the initial forward slide toward
+	 *  ideal stand-off distance.  Returns true if a slide was armed (caller should skip the
+	 *  legacy step-in launch).  DMC-style: only the initial snap -- no maintain, no capsule
+	 *  ignore.  Enemy knockback creates the gap for the NEXT swing's snap to close. */
+	bool TryStartMagnetSlide();
+
+	/** Reset any in-flight slide state.  Called by ResetCombo / CancelAttack so a subsequent
+	 *  attack starts from a clean slate. */
+	void EndMagnet();
+
+	/** Forward-cone sphere overlap: returns the nearest HSDummyEnemy within MagnetSearchRadius
+	 *  that lies inside the player's MagnetSearchConeDegrees cone, or nullptr. */
+	AActor* FindMagnetTarget() const;
+
+	/** Force-restore the owner's GravityScale to DefaultGravityScale and clear any gravity-override
+	 *  tracking flags (bAirComboActive, bHoldGravityApplied).  Safe to call unconditionally --
+	 *  no-ops if nothing was overridden.  This is the single choke point for ALL gravity restore
+	 *  paths (land, release, combo end, attack cancel, component EndPlay) so the two override
+	 *  systems can't leak their state into each other. */
+	void RestoreGravityIfOverridden();
 
 	FTimerHandle TimeDilationHandle;
 

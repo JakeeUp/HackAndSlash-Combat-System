@@ -43,12 +43,26 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UHSEnemyCombatAI* CombatAI;
 
+	/** When true, this enemy behaves as a passive training dummy: the combat AI is
+	 *  fully paused (no strafe, no approach, no attacks) and the enemy just stands
+	 *  in place and takes hits. Hit reacts, knockback, air-hang, and damage all still
+	 *  work -- only the offensive/movement AI is disabled. Can be toggled at runtime. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Configurations")
+	bool bTrainingDummy = false;
+
 	UFUNCTION(BlueprintPure, Category = "State")
 	FORCEINLINE EEnemyState GetEnemyState() const { return EnemyState; }
 
 	// IHSDamageable
 	virtual void ApplyDamage_Implementation(float DamageAmount, AActor* DamageCauser) override;
 	virtual void ApplyDamageEx_Implementation(float DamageAmount, AActor* DamageCauser, const FVector& HitDirection, EHitWeight HitWeight) override;
+
+	/** Suspend this enemy in the air for Duration seconds: reduces GravityScale to GravScale,
+	 *  zeros current vertical velocity, and applies a small upward Lift so they don't drift
+	 *  down immediately on low gravity.  Called each connected hit by the player's air-hold
+	 *  loop; repeat calls refresh the timer so the hang lasts as long as the flurry lands. */
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void ApplyAirHang(float Duration, float GravScale, float Lift);
 
 	UFUNCTION(BlueprintPure, Category = "State")
 	float GetHealthPercent() const { return (MaxHealth > 0.f) ? (CurrentHealth / MaxHealth) : 0.f; }
@@ -281,4 +295,16 @@ private:
 	FTimerHandle HitstopTimerHandle;
 	FTimerHandle GetupTimerHandle;
 	FTimerHandle DamageFlashTimerHandle;
+
+	/** Restores GravityScale to its pre-hang value; fires from the AirHangTimerHandle. */
+	void EndAirHang();
+
+	/** Gravity saved at the start of the hang window so EndAirHang can restore exactly
+	 *  what was active before the hold-loop took over. */
+	float AirHangSavedGravity = 1.f;
+
+	/** True while this enemy is currently suspended by the player's hold-loop. */
+	bool bAirHangActive = false;
+
+	FTimerHandle AirHangTimerHandle;
 };
