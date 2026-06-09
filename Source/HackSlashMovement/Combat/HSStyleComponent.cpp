@@ -49,7 +49,7 @@ void UHSStyleComponent::RegisterHit(float DamageDealt)
 	float Points = HitBasePoints;
 
 	// Check if this attack type differs from the last -- reward variety like DMC
-	const uint8 CurrentType = static_cast<uint8>(ComboCount % 3); // Simple variety proxy
+	const uint8 CurrentType = static_cast<uint8>(ComboCount % 3); 
 	if (LastHitAttackType != 255 && CurrentType != LastHitAttackType)
 	{
 		Points *= VarietyMultiplier;

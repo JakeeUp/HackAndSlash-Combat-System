@@ -268,15 +268,6 @@ struct FHSCombatTweakables
 	UPROPERTY(EditDefaultsOnly, Category = "Air Combat", meta = (EditCondition = "bEnableAirCombat"))
 	FAirCombatConfig AirCombat;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Attack Magnet")
-	FAttackMagnetConfig Magnet;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Hit Feedback", meta = (InlineEditConditionToggle))
-	bool bEnableHitFeedback = true;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Hit Feedback", meta = (EditCondition = "bEnableHitFeedback"))
-	FCombatHitFeedbackConfig HitFeedback;
-
 	UPROPERTY(EditDefaultsOnly, Category = "Sound Effects", meta = (InlineEditConditionToggle))
 	bool bEnableSFX = true;
 

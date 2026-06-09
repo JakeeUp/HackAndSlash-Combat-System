@@ -14,6 +14,8 @@ class UAnimMontage;
 class UHSCombatComponent;
 class UHSStyleComponent;
 class UHSDynamicCameraComponent;
+class UHSAttackMagnetComponent;
+class UHSHitFeedbackComponent;
 class UHSStyleHUD;
 class UHSLockOnReticle;
 class UUserWidget;
@@ -73,6 +75,12 @@ public:
 	class UHSDynamicCameraComponent* DynamicCamera;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	class UHSAttackMagnetComponent* Magnet;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	class UHSHitFeedbackComponent* HitFeedback;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UAudioComponent* BGMAudio;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -105,6 +113,12 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "State")
 	FORCEINLINE UHSDynamicCameraComponent* GetDynamicCamera() const { return DynamicCamera; }
+
+	UFUNCTION(BlueprintPure, Category = "State")
+	FORCEINLINE UHSAttackMagnetComponent* GetMagnet() const { return Magnet; }
+
+	UFUNCTION(BlueprintPure, Category = "State")
+	FORCEINLINE UHSHitFeedbackComponent* GetHitFeedback() const { return HitFeedback; }
 
 	UFUNCTION(BlueprintPure, Category = "State")
 	FORCEINLINE FVector2D GetMoveInputCached() const { return moveInputCached; }

@@ -5,6 +5,8 @@
 #include "Combat/HSDamageable.h"
 #include "Combat/HSStyleComponent.h"
 #include "Combat/HSDynamicCameraComponent.h"
+#include "Combat/HSAttackMagnetComponent.h"
+#include "Combat/HSHitFeedbackComponent.h"
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -30,12 +32,6 @@ void UHSCombatComponent::BeginPlay()
 	Super::BeginPlay();
 
 	OwnerChar = Cast<AHSPlayerCharacter>(GetOwner());
-
-	// Cache the camera's default FOV so UpdateFOVCompression can restore it correctly
-	if (OwnerChar && OwnerChar->FollowCamera)
-	{
-		DefaultCameraFOV = OwnerChar->FollowCamera->FieldOfView;
-	}
 
 	// Cache the authoritative gravity baseline ONCE, before any combat system can modify it.
 	// All restore paths target this value -- never a "saved before override" snapshot, which
@@ -240,7 +236,8 @@ void UHSCombatComponent::PlayNextAttack(EAttackType Type)
 	// target and ignore their capsule for the rest of the attack.  When the magnet fires
 	// we SKIP the legacy step-in launch -- otherwise the launch fights the slide and we
 	// end up intersecting the enemy (exactly what the magnet exists to prevent).
-	const bool bMagnetArmed = (Type != EAttackType::EAT_Rising) && TryStartMagnetSlide();
+	UHSAttackMagnetComponent* Mag = OwnerChar->GetMagnet();
+	const bool bMagnetArmed = (Type != EAttackType::EAT_Rising) && Mag && Mag->TryStartSlide();
 
 	// Step-in fallback: only used when no magnet target was found.  Preserves the old
 	// "swing at air lunges you forward" behaviour for when you're not locked on / aimed
@@ -529,9 +526,13 @@ void UHSCombatComponent::ResetCombo()
 	bOnDelayedBranch = false;
 	bOnForwardBranch = false;
 
-	// Release capsule-ignore on the most recent magnet target so out-of-combat
-	// movement/push behaviour is restored.  Safe to call when no magnet was armed.
-	EndMagnet();
+	if (OwnerChar)
+	{
+		if (UHSAttackMagnetComponent* Mag = OwnerChar->GetMagnet())
+		{
+			Mag->EndSlide();
+		}
+	}
 }
 
 void UHSCombatComponent::RotateOwnerToInput()
@@ -708,78 +709,13 @@ void UHSCombatComponent::DoSwordTrace()
 		PlayHitSound();
 	}
 
-	// Camera shake on hit (FF16 style impact feel)
-	if (bLandedHit && Tweakables.HitFeedback.CameraShake)
-	{
-		float ShakeScale = Tweakables.HitFeedback.LightShakeScale;
-		if (CurrentAttackType == EAttackType::EAT_Heavy) ShakeScale = Tweakables.HitFeedback.HeavyShakeScale;
-		else if (CurrentAttackType == EAttackType::EAT_Air) ShakeScale = Tweakables.HitFeedback.AirShakeScale;
-
-		if (APlayerController* PC = Cast<APlayerController>(OwnerChar->GetController()))
-		{
-			PC->ClientStartCameraShake(Tweakables.HitFeedback.CameraShake, ShakeScale);
-		}
-	}
-
-	// FOV compression per hit -- accumulates up to Tweakables.HitFeedback.MaxFOVCompression, eases back in Tick
-	if (bLandedHit)
-	{
-		CurrentFOVCompression = FMath::Min(CurrentFOVCompression + Tweakables.HitFeedback.FOVCompressionPerHit, Tweakables.HitFeedback.MaxFOVCompression);
-	}
-
-	// Trauma-based camera shake. DmC 2013 favors hitstop over shake, but a small
-	// Perlin-trauma nudge sells the impact without overwhelming the frame.
-	// Scale by hit weight so light pokes barely move the camera and finishers/launchers snap it.
 	if (bLandedHit && OwnerChar)
 	{
-		if (UHSDynamicCameraComponent* DynCam = OwnerChar->GetDynamicCamera())
+		if (UHSHitFeedbackComponent* HF = OwnerChar->GetHitFeedback())
 		{
-			float TraumaAmount = 0.12f;  // light / mid-combo default
-			float PitchKick    = 0.f;    // upward tilt bias for heavier hits
-			float KickHoriz    = 8.f;    // backward positional recoil (units/sec impulse into spring)
-			float KickUp       = 2.f;    // small vertical rise component
-
-			switch (HitWeight)
-			{
-			case EHitWeight::EHW_Light:    TraumaAmount = 0.12f; KickHoriz = 8.f;  KickUp = 2.f; break;
-			case EHitWeight::EHW_Heavy:    TraumaAmount = 0.22f; KickHoriz = 14.f; KickUp = 4.f; break;
-			case EHitWeight::EHW_Finisher: TraumaAmount = 0.30f; PitchKick = 3.f; KickHoriz = 20.f; KickUp = 6.f; break;
-			case EHitWeight::EHW_Launcher: TraumaAmount = 0.30f; PitchKick = 6.f; KickHoriz = 22.f; KickUp = 8.f; break;
-			default: break;
-			}
-
-			// Heavy attack type bumps trauma a notch regardless of weight (charged swings feel weightier).
-			if (CurrentAttackType == EAttackType::EAT_Heavy)
-			{
-				TraumaAmount = FMath::Min(TraumaAmount + 0.04f, 1.f);
-				KickHoriz   += 3.f;
-			}
-
-			DynCam->AddTrauma(TraumaAmount);
-			if (PitchKick > 0.f)
-			{
-				DynCam->AddPitchKick(PitchKick);
-			}
-
-			// Positional kick: opposite the swing direction (player is hitting forward, camera
-			// pushes backward), with a small upward component.  The spring on the camera side
-			// dampens it back within ~0.25s so the next hit in the combo can stack cleanly.
-			const FVector KickImpulse = (-OwnerChar->GetActorForwardVector() * KickHoriz)
-			                          + FVector(0.f, 0.f, KickUp);
-			DynCam->AddPositionalKick(KickImpulse);
+			HF->OnHitLanded(CurrentAttackType, HitWeight, OwnerChar->GetActorForwardVector());
 		}
 	}
-}
-
-void UHSCombatComponent::UpdateFOVCompression(float DeltaTime)
-{
-	if (!OwnerChar || !OwnerChar->FollowCamera) return;
-
-	// Ease back toward 0 every frame (whether or not we hit)
-	CurrentFOVCompression = FMath::FInterpTo(CurrentFOVCompression, 0.f, DeltaTime, Tweakables.HitFeedback.FOVRecoverySpeed);
-
-	// Apply compression as a zoom-in (subtract from default)
-	OwnerChar->FollowCamera->FieldOfView = DefaultCameraFOV - CurrentFOVCompression;
 }
 
 void UHSCombatComponent::PlaySwingSound()
@@ -826,239 +762,4 @@ void UHSCombatComponent::PlayHitSound()
 	}
 }
 
-void UHSCombatComponent::ApplyScreenHitEffect()
-{
-	if (!OwnerChar) return;
-
-	APlayerController* PC = Cast<APlayerController>(OwnerChar->GetController());
-	if (!PC) return;
-
-	// White screen flash (FF16 style)
-	if (APlayerCameraManager* CamMgr = PC->PlayerCameraManager)
-	{
-		CamMgr->StartCameraFade(Tweakables.HitFeedback.FlashIntensity, 0.f, Tweakables.HitFeedback.FlashDuration, FLinearColor::White, false, true);
-	}
-
-	// Brief time dilation for dramatic impact (DMC3/FF16 style)
-	if (UWorld* World = GetWorld())
-	{
-		UGameplayStatics::SetGlobalTimeDilation(World, Tweakables.HitFeedback.TimeDilationScale);
-
-		World->GetTimerManager().ClearTimer(TimeDilationHandle);
-		World->GetTimerManager().SetTimer(TimeDilationHandle, this, &UHSCombatComponent::RestoreTimeDilation, Tweakables.HitFeedback.TimeDilationDuration, false);
-	}
-}
-
-void UHSCombatComponent::RestoreTimeDilation()
-{
-	if (UWorld* World = GetWorld())
-	{
-		UGameplayStatics::SetGlobalTimeDilation(World, 1.f);
-	}
-}
-
-/*****************************************************/
-/*                    Attack Magnet                  */
-/*****************************************************/
-// DMC-style magnet: every swing snaps the player to an ideal stand-off distance in
-// front of the current target over a handful of frames, and ignores the target's
-// capsule so the two never intersect mid-combo.  The slide itself is position-driven
-// (SetActorLocation + sweep) with an ease-out cubic so the first frames do most of
-// the travel and the last frames settle smoothly.
-
-bool UHSCombatComponent::TryStartMagnetSlide()
-{
-	if (!Tweakables.Magnet.bEnabled || !OwnerChar) return false;
-
-	AActor* Target = FindMagnetTarget();
-	if (!Target) return false;
-
-	const FVector OwnerLoc  = OwnerChar->GetActorLocation();
-	const FVector TargetLoc = Target->GetActorLocation();
-
-	// Direction from target back to player (this is the side the slide ends on).
-	// If they're perfectly stacked, bail -- no meaningful direction to slide in.
-	FVector FromTarget = OwnerLoc - TargetLoc;
-	FromTarget.Z = 0.f;
-	if (FromTarget.IsNearlyZero())
-	{
-		return false;
-	}
-	const FVector StandoffDir = FromTarget.GetSafeNormal();
-
-	// Gap-close guard: in DMC the magnet is a forward gap-closer only.  If you're already
-	// at or inside ideal distance, the swing fires in place -- no drift, no re-snap.
-	// This is the big fix for "moving all around the enemy" through a combo: in close
-	// combat, ZERO slides fire, so the player stays planted on whichever side they
-	// originally approached from.
-	const float CurDist2D = FVector::Dist2D(OwnerLoc, TargetLoc);
-	if (Tweakables.Magnet.bOnlyCloseGaps && CurDist2D <= Tweakables.Magnet.IdealDistance + Tweakables.Magnet.GapCloseTolerance)
-	{
-		// Player's already well-placed.  Track the target (so per-frame clamp works) but
-		// don't arm a slide.  Return true anyway so the caller skips the legacy step-in.
-		MagnetTargetActor  = Target;
-		bMagnetSliding     = false;
-		MagnetSlideElapsed = 0.f;
-		return true;
-	}
-
-	// Ideal slide destination: ideal distance out from the target on the player's side.
-	// Preserve the player's Z always -- we only want XY repositioning.  Pulling Z toward
-	// the target would snap the player into the floor / into the air if the capsules are
-	// at different heights, or while juggling in the air.
-	FVector Destination = TargetLoc + StandoffDir * Tweakables.Magnet.IdealDistance;
-	Destination.Z = OwnerLoc.Z;
-
-	// Reject slides that would drag the player further than Tweakables.Magnet.MaxSlideDistance --
-	// better to whiff than teleport.
-	const float SlideDist = FVector::Dist(OwnerLoc, Destination);
-	if (SlideDist > Tweakables.Magnet.MaxSlideDistance)
-	{
-		return false;
-	}
-
-	MagnetSlideStart   = OwnerLoc;
-	MagnetSlideTarget  = Destination;
-	MagnetSlideElapsed = 0.f;
-	bMagnetSliding     = (SlideDist > KINDA_SMALL_NUMBER);
-	MagnetTargetActor  = Target;
-
-	return true;
-}
-
-void UHSCombatComponent::UpdateMagnetSlide(float DeltaTime)
-{
-	if (!OwnerChar) return;
-
-	// ── Phase 1: initial gap-close slide (only fires when we were too far) ─────
-	if (bMagnetSliding)
-	{
-		MagnetSlideElapsed += DeltaTime;
-		const float Alpha = FMath::Clamp(MagnetSlideElapsed / FMath::Max(Tweakables.Magnet.SlideDuration, 0.01f), 0.f, 1.f);
-
-		// Ease-out cubic: travels most of the distance early, settles smoothly.  Reads as
-		// a "snap" visually while keeping the last frame of motion sub-perceptual.
-		const float Eased = 1.f - FMath::Pow(1.f - Alpha, 3.f);
-
-		const FVector NewLoc = FMath::Lerp(MagnetSlideStart, MagnetSlideTarget, Eased);
-
-		// Sweep=true so enemy capsules, walls, and floors still stop us.  The slide target
-		// is on the player's own side of the enemy at IdealDistance, so the sweep doesn't
-		// hit the target capsule -- we settle just outside it.
-		OwnerChar->SetActorLocation(NewLoc, /*bSweep=*/ true);
-
-		if (Alpha >= 1.f)
-		{
-			bMagnetSliding = false;
-		}
-		return;
-	}
-
-	// ── Phase 2: asymmetric per-frame safety clamp ────────────────────────────
-	// Push-out only, never pull-in.  If the player drifts / root-motions INTO the
-	// enemy's capsule (or inside Tweakables.Magnet.MinDistance), shove them back out.  Does NOT
-	// pull them back toward the enemy if they're already outside.  This is the fix
-	// for "phasing through the enemy capsule" -- no matter what the attack anim's
-	// root motion tries, the player can't end up closer than MinDistance.
-	AActor* Target = MagnetTargetActor.Get();
-	if (!Target || !bIsAttacking || Tweakables.Magnet.MinDistance <= 0.f) return;
-
-	const FVector TargetLoc = Target->GetActorLocation();
-	const FVector OwnerLoc  = OwnerChar->GetActorLocation();
-
-	FVector FromTarget = OwnerLoc - TargetLoc;
-	const float SavedZ = FromTarget.Z;
-	FromTarget.Z = 0.f;
-
-	const float CurDist = FromTarget.Size();
-	if (CurDist >= Tweakables.Magnet.MinDistance) return; // already safely outside -- no-op
-	if (CurDist < KINDA_SMALL_NUMBER) return; // perfectly stacked -- direction undefined
-
-	const FVector StandoffDir = FromTarget / CurDist;
-	const FVector ClampedLoc  = TargetLoc + StandoffDir * Tweakables.Magnet.MinDistance + FVector(0.f, 0.f, SavedZ);
-
-	OwnerChar->SetActorLocation(ClampedLoc, /*bSweep=*/ true);
-}
-
-void UHSCombatComponent::EndMagnet()
-{
-	bMagnetSliding     = false;
-	MagnetSlideElapsed = 0.f;
-	MagnetTargetActor  = nullptr;
-}
-
-AActor* UHSCombatComponent::FindMagnetTarget() const
-{
-	if (!OwnerChar) return nullptr;
-
-	// Prefer the lock-on target when it's within magnet range -- this keeps the slide
-	// aligned with what the camera is already framing, which is the DMC default.
-	if (AActor* Locked = OwnerChar->GetLockedTarget())
-	{
-		if (!Locked->IsPendingKillPending())
-		{
-			const float Dist = FVector::Dist(OwnerChar->GetActorLocation(), Locked->GetActorLocation());
-			if (Dist <= Tweakables.Magnet.SearchRadius)
-			{
-				return Locked;
-			}
-		}
-	}
-
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	const FVector OwnerLoc = OwnerChar->GetActorLocation();
-	const FVector Forward  = OwnerChar->GetActorForwardVector();
-
-	// Sphere overlap filtered to AHSDummyEnemy -- cheap and precise enough for a handful
-	// of enemies.  For hundreds we'd swap to a spatial grid; not needed at this scale.
-	TArray<AActor*> Overlaps;
-	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn));
-	TArray<AActor*> IgnoreActors;
-	IgnoreActors.Add(OwnerChar);
-
-	UKismetSystemLibrary::SphereOverlapActors(
-		World, OwnerLoc, Tweakables.Magnet.SearchRadius,
-		ObjectTypes, AHSDummyEnemy::StaticClass(),
-		IgnoreActors, Overlaps);
-
-	// Aerial swings use a wider cone so juggled enemies that have drifted off-axis still get
-	// picked up -- DMC3's aerial rave autotracks this way.  On the ground we want a tighter
-	// cone so you don't magnet-sideways into non-target enemies you're just passing near.
-	const bool bAirborne = OwnerChar->GetCharacterMovement() && OwnerChar->GetCharacterMovement()->IsFalling();
-	const float ActiveCone = bAirborne ? Tweakables.Magnet.AirSearchConeDegrees : Tweakables.Magnet.SearchConeDegrees;
-	const float ConeCosine = FMath::Cos(FMath::DegreesToRadians(FMath::Min(ActiveCone, 179.9f)));
-
-	AActor* Best = nullptr;
-	float   BestDistSq = TNumericLimits<float>::Max();
-
-	for (AActor* Candidate : Overlaps)
-	{
-		if (!Candidate) continue;
-		AHSDummyEnemy* Enemy = Cast<AHSDummyEnemy>(Candidate);
-		if (!Enemy || Enemy->IsDead()) continue;
-
-		FVector ToTarget = Candidate->GetActorLocation() - OwnerLoc;
-		ToTarget.Z = 0.f;
-		const float DistSq = ToTarget.SizeSquared();
-		if (DistSq < KINDA_SMALL_NUMBER) continue;
-
-		const FVector Dir = ToTarget.GetSafeNormal();
-		FVector FlatForward = Forward;
-		FlatForward.Z = 0.f;
-		FlatForward.Normalize();
-
-		if (FVector::DotProduct(FlatForward, Dir) < ConeCosine) continue;
-
-		if (DistSq < BestDistSq)
-		{
-			BestDistSq = DistSq;
-			Best = Candidate;
-		}
-	}
-
-	return Best;
-}
 

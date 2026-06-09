@@ -15,6 +15,8 @@
 #include "Combat/HSCombatComponent.h"
 #include "Combat/HSStyleComponent.h"
 #include "Combat/HSDynamicCameraComponent.h"
+#include "Combat/HSAttackMagnetComponent.h"
+#include "Combat/HSHitFeedbackComponent.h"
 #include "UI/HSStyleHUD.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/KismetSystemLibrary.h"
@@ -84,6 +86,8 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	Combat = CreateDefaultSubobject<UHSCombatComponent>(TEXT("Combat"));
 	Style = CreateDefaultSubobject<UHSStyleComponent>(TEXT("Style"));
 	DynamicCamera = CreateDefaultSubobject<UHSDynamicCameraComponent>(TEXT("DynamicCamera"));
+	Magnet = CreateDefaultSubobject<UHSAttackMagnetComponent>(TEXT("Magnet"));
+	HitFeedback = CreateDefaultSubobject<UHSHitFeedbackComponent>(TEXT("HitFeedback"));
 
 	BGMAudio = CreateDefaultSubobject<UAudioComponent>(TEXT("BGMAudio"));
 	BGMAudio->SetupAttachment(RootComponent);
@@ -323,18 +327,19 @@ void AHSPlayerCharacter::Tick(float DeltaTime)
 		FollowCamera->SetRelativeRotation(DynamicCamera->GetCameraRotationOffset());
 	}
 
-	// DMC-style FOV compression: zoom in slightly per hit, ease back passively
+	if (HitFeedback)
+	{
+		HitFeedback->UpdateFOVCompression(DeltaTime);
+	}
+
 	if (Combat)
 	{
-		Combat->UpdateFOVCompression(DeltaTime);
-
-		// Held-light mid-air loop -- Combat starts/auto-replays the loop montage while
-		// the light-attack button stays held AND the player is airborne, stops it on release/land.
 		Combat->UpdateAirHoldLoop(bLightAttackHeld, GetCharacterMovement()->IsFalling());
+	}
 
-		// DMC-style attack magnet: slides us to an ideal stand-off distance in front of
-		// the target over the first few frames of each swing.  No-op when idle.
-		Combat->UpdateMagnetSlide(DeltaTime);
+	if (Magnet)
+	{
+		Magnet->UpdateSlide(DeltaTime, Combat && Combat->IsAttacking());
 	}
 
 	// Cinematic FOV override: layered AFTER combat's FOV compression so hero-shot FOV wins

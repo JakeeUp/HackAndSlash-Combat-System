@@ -55,13 +55,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void UpdateAirHoldLoop(bool bButtonHeld, bool bFalling);
 
-	/** Drives the attack-magnet slide.  Called every frame from AHSPlayerCharacter::Tick.
-	 *  No-op unless a slide was kicked off by the most recent swing.  Eases the player from
-	 *  the slide's start position to its target over MagnetSlideDuration seconds, then flags
-	 *  the slide as finished (capsule-ignore persists until attack ends via EndMagnet). */
-	UFUNCTION(BlueprintCallable, Category = "Combat")
-	void UpdateMagnetSlide(float DeltaTime);
-
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	FORCEINLINE bool IsAttacking() const { return bIsAttacking; }
 
@@ -70,10 +63,6 @@ public:
 
 	/** Called when the character lands -- restores gravity and resets air hit tracking. */
 	void OnOwnerLanded();
-
-	/** Called every frame from AHSPlayerCharacter::Tick.
-	 *  Eases the accumulated FOV compression back to 0 and applies it to the follow camera. */
-	void UpdateFOVCompression(float DeltaTime);
 
 	/*****************************************************/
 	/*               Anim Notify Callbacks               */
@@ -172,25 +161,6 @@ protected:
 	 *  so other systems (or a second hold-loop re-entry) don't double-save or clobber. */
 	bool bHoldGravityApplied = false;
 
-	/** True while the magnet slide is mid-flight between start and target.  Cleared once the
-	 *  ease completes OR the attack ends (whichever fires first via EndMagnet).  Note: the
-	 *  capsule-ignore on MagnetTargetActor persists for the full attack, not just this flag. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "State")
-	bool bMagnetSliding = false;
-
-	/** Seconds elapsed into the current magnet slide (0 -> MagnetSlideDuration). */
-	float MagnetSlideElapsed = 0.f;
-
-	/** Captured player world position at the moment the slide started. */
-	FVector MagnetSlideStart = FVector::ZeroVector;
-
-	/** Target world position the slide is easing toward. */
-	FVector MagnetSlideTarget = FVector::ZeroVector;
-
-	/** Target the magnet is currently locked to this attack.  Stored weak so we can safely
-	 *  skip capsule-ignore cleanup if the target dies / despawns before the attack ends. */
-	TWeakObjectPtr<AActor> MagnetTargetActor;
-
 private:
 	void PlayNextAttack(EAttackType Type);
 	UAnimMontage* GetMontageForCombo(EAttackType Type, int32 Index) const;
@@ -211,27 +181,6 @@ private:
 	/** Play the hit sound for the current attack type. */
 	void PlayHitSound();
 
-	/** Screen flash + time dilation for heavy/rising hits. */
-	void ApplyScreenHitEffect();
-
-	/** Restore time dilation after hit freeze. */
-	void RestoreTimeDilation();
-
-	/** Pick a magnet target for this swing (lock-on target takes priority, else nearest enemy
-	 *  in the forward cone within MagnetSearchRadius) and arm the initial forward slide toward
-	 *  ideal stand-off distance.  Returns true if a slide was armed (caller should skip the
-	 *  legacy step-in launch).  DMC-style: only the initial snap -- no maintain, no capsule
-	 *  ignore.  Enemy knockback creates the gap for the NEXT swing's snap to close. */
-	bool TryStartMagnetSlide();
-
-	/** Reset any in-flight slide state.  Called by ResetCombo / CancelAttack so a subsequent
-	 *  attack starts from a clean slate. */
-	void EndMagnet();
-
-	/** Forward-cone sphere overlap: returns the nearest HSDummyEnemy within MagnetSearchRadius
-	 *  that lies inside the player's MagnetSearchConeDegrees cone, or nullptr. */
-	AActor* FindMagnetTarget() const;
-
 	/** Force-restore the owner's GravityScale to DefaultGravityScale and clear any gravity-override
 	 *  tracking flags (bAirComboActive, bHoldGravityApplied).  Safe to call unconditionally --
 	 *  no-ops if nothing was overridden.  This is the single choke point for ALL gravity restore
@@ -239,11 +188,4 @@ private:
 	 *  systems can't leak their state into each other. */
 	void RestoreGravityIfOverridden();
 
-	FTimerHandle TimeDilationHandle;
-
-	/** Accumulated FOV compression in degrees.  Zeroes out via FInterpTo when not hitting. */
-	float CurrentFOVCompression = 0.f;
-
-	/** Default FOV of the follow camera -- captured once in BeginPlay so we can restore it. */
-	float DefaultCameraFOV = 90.f;
 };
